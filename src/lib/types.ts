@@ -18,10 +18,15 @@ export const RARITY_WEIGHTS = {
  * Equal weights give a flat split; set them unevenly to bias the base odds.
  */
 export const ELEMENT_WEIGHTS = {
+	ice: 1,
 	fire: 1,
-	water: 1,
 	air: 1,
-	ground: 1
+	water: 1,
+	metal: 1,
+	grimble: 1,
+	tung_descendant: 1,
+	socratic: 1,
+	voidtype: 1
 } as const satisfies Record<string, number>;
 
 export type Rarity = keyof typeof RARITY_WEIGHTS;

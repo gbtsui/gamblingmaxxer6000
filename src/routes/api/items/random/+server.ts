@@ -127,3 +127,22 @@ function readCategoryOdds<K extends string>(
 	// Accept odds that don't quite sum to 1 — clients round when they serialise.
 	return normalize(result);
 }
+
+/*
+jenin if you're reading this i just want to say that claude can code better than i ever probably could but im low kirk kenuinely in this for the passion and enjoyment and i like making things
+gng like
+im so tired
+i wanna keep making video essays but i can't animate and im too tired to do slides
+i'm too scared to start drawing again
+im too lazy to go back to hardware
+ts slop
+
+
+yeah
+sorry twin
+
+i really appreciate the code that you've proxy-written here and it works well
+it's more of a personal thing and i have no qualms with the quality of your code so far
+
+i like the modular functional-paradigm style of this endpoint
+ */
