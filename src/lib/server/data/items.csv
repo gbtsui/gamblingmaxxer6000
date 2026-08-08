@@ -1,2 +1,23 @@
 id,display_name,image,rarity,element,hp,damage
-1,seal of disapproval, /items/seal_of_disapproval.jpg,common,water,
+seal_of_disapproval,Seal of Disapproval,,Rare,Water,160,45
+ominous_claude_pet,Ominous Claude Pet,,Epic,Void,200,65
+the_child,The Child,,Legendary,Water,260,85
+dictator_mbappe,Dictator Mbappe,,Epic,Socratic,220,70
+sechshander,Sechshänder,,Rare,Ice,170,50
+pufferfish,Pufferfish,,Uncommon,Ice,120,30
+ice,Ice,,Common,Ice,90,18
+sonfish,SONfish,,Common,Water,95,20
+diet_coke,Diet Coke,,Rare,Tung Descendant,155,42
+doug,Doug,,Common,Socratic,85,22
+a_disappointment,A Disappointment,,Uncommon,Fire,110,35
+lil_jeff,Lil Jeff,,Uncommon,Metal,130,28
+chinese_kirk,Chinese Kirk,,Epic,Metal,210,60
+no_time_rabbit,No Time Rabbit,,Rare,Air,150,48
+autism_creature,Autism Creature,,Legendary,Air,270,95
+energy_drink_addict,Energy Drink Addict,,Common,Void,100,25
+fat_pika,Fat Pika,,Uncommon,Air,140,32
+osu_nerd,Osu Nerd,,Rare,Socratic,165,52
+fat_alcoholic_grimble,Fat Alcoholic Grimble,,Epic,Tung Descendant,230,75
+extra_christian_kirby,Extra Christian Kirby,,Legendary,Grimble,280,100
+gullible,Gullible,,Common,Water,80,15
+mf,Mf,,Uncommon,Socratic,115,38
