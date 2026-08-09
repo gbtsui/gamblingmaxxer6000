@@ -331,6 +331,34 @@
 					{result ? OUTCOMES[result.outcome] : ''}
 				</span>
 
+				{#if result?.outcome === 'ai'}
+					<div
+						class="fixed inset-0 z-50 flex min-h-dvh flex-col items-center justify-center bg-ink px-6 text-center"
+					>
+						<div class="space-y-2">
+							<h2 class="text-6xl hard-shadow sm:text-8xl">you lost.</h2>
+							<img src="/loss.png" alt="" class="w-1/2 justify-self-center" />
+							<p class="text-lg text-chalk/85 italic sm:text-xl">skill issue</p>
+						</div>
+
+						<div class="flex gap-4 m-4">
+							<button
+								onclick={start}
+								class="slab bg-wall-lit px-6 py-3 text-lg text-ink hover:bg-chalk"
+							>
+								run it again
+							</button>
+
+							<button
+								onclick={onback}
+								class="slab bg-chalk px-6 py-3 text-lg text-ink hover:bg-white"
+							>
+								← back to the floor
+							</button>
+						</div>
+					</div>
+				{/if}
+
 				<button onclick={start} class="slab bg-wall-lit px-6 py-3 text-lg text-ink hover:bg-chalk">
 					run it again
 				</button>
