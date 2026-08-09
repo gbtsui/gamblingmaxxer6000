@@ -165,7 +165,7 @@
             }));
 
         try {
-            const res = await fetch('/api/fight', {
+            const res = await fetch('/api/battle', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ player, pool }),
