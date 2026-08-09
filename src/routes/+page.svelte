@@ -158,7 +158,6 @@
 	.card-row img {
 		width: 10rem;
 		height: auto;
-		border: 0.25rem solid #8bcbeb;
 		box-shadow: 0 0.6rem 1rem rgb(0 0 0 / 0.45);
 	}
 

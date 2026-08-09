@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { resolve } from '$app/paths';
 	import Battlefield from './Battlefield.svelte';
 	import BattleLog from './BattleLog.svelte';
 	import Sparkle from './Sparkle.svelte';
@@ -338,6 +339,14 @@
 				<button onclick={onback} class="slab bg-chalk px-6 py-3 text-lg text-ink hover:bg-white">
 					← back to the floor
 				</button>
+
+				<!-- All the way out, rather than back into the flow. -->
+				<a
+					href={resolve('/')}
+					class="slab bg-chalk px-6 py-3 text-lg text-ink no-underline hover:bg-white"
+				>
+					go home
+				</a>
 			{/if}
 		</div>
 
