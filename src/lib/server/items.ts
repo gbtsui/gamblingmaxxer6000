@@ -55,12 +55,33 @@ export function parseCsv(text: string): string[][] {
 }
 
 /**
+ * Registry keys are lower snake_case, but the CSV is written for humans —
+ * `Tung Descendant` has to match `tung_descendant`.
+ */
+function normalizeKey(value: string | undefined): string {
+	return (value ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * Reads a stat column. Throws rather than defaulting to 0: a card that can't
+ * take or deal a hit would sit in the pool doing nothing.
+ */
+function readStat(raw: string | undefined, column: string, line: number): number {
+	const value = Number((raw ?? '').trim());
+
+	if (!Number.isInteger(value) || value <= 0) {
+		throw new Error(`items.csv line ${line}: ${column} "${raw ?? ''}" must be a positive integer`);
+	}
+	return value;
+}
+
+/**
  * Turns CSV text into items. The first row is treated as a header if its first
  * cell looks like a column name rather than an id. Columns are positional:
- * id, display name, path to PNG, rarity, element.
+ * id, display name, path to PNG, rarity, element, hp, damage.
  *
- * Throws on an unknown rarity or element — a typo in the data should be loud
- * rather than quietly leaving a row unpullable.
+ * Throws on an unknown rarity or element, or a missing stat — a typo in the
+ * data should be loud rather than quietly leaving a row unpullable.
  */
 export function parseItems(text: string): Item[] {
 	const rows = parseCsv(text);
@@ -73,12 +94,12 @@ export function parseItems(text: string): Item[] {
 
 	const items: Item[] = [];
 
-	body.forEach(([id, displayName, image, rarity, element], index) => {
+	body.forEach(([id, displayName, image, rarity, element, hp, damage], index) => {
 		if ((id ?? '').trim() === '') return;
 
 		const line = index + lineOffset;
-		const normalizedRarity = (rarity ?? '').trim().toLowerCase();
-		const normalizedElement = (element ?? '').trim().toLowerCase();
+		const normalizedRarity = normalizeKey(rarity);
+		const normalizedElement = normalizeKey(element);
 
 		if (!isRarity(normalizedRarity)) {
 			throw new Error(
@@ -93,10 +114,12 @@ export function parseItems(text: string): Item[] {
 
 		items.push({
 			id: id.trim(),
-			displayName: (displayName ?? '').trim(),
+			display_name: (displayName ?? '').trim(),
 			image: (image ?? '').trim(),
 			rarity: normalizedRarity,
-			element: normalizedElement
+			element: normalizedElement,
+			hp: readStat(hp, 'hp', line),
+			damage: readStat(damage, 'damage', line)
 		});
 	});
 
