@@ -1,6 +1,8 @@
 <script lang="ts">
     import {fly, scale} from "svelte/transition"
     import { flip } from "svelte/animate";
+    import {SvelteSet} from "svelte/reactivity";
+    import type {BattleCard} from "$lib/types";
 
     type Card = {
         id: string;
@@ -12,7 +14,32 @@
         damage: number;
     }
 
+    type BattleLogEntry = {
+        step: number;
+        attacker: string;
+        defender: string;
+        attackerElement: Element;
+        defenderElement: Element;
+        baseDamage: number;
+        multiplier: number;
+        totalDamage: number;
+        defenderOldHp: number;
+        defenderNewHp: number;
+        knockout: boolean;
+    };
+
     let mode = $state<"PULL" | "DECK" | "FIGHT" | "RESULT">("PULL")
+
+    let battleLogs = $state<BattleLogEntry[]>([]);
+    let currentLogIndex = $state(0);
+    let isAnimating = $state(false);
+    let animationPhase = $state<'idle' | 'attacking' | 'damaging' | 'knockout' | 'complete'>('idle');
+    let playerTeam = $state<BattleCard[]>([]);
+    let aiTeam = $state<BattleCard[]>([]);
+    let displayPlayerHp = $state<Record<string, number>>({});
+    let displayAiHp = $state<Record<string, number>>({});
+    const ANIM_SPEED = 1200;
+
 
     let isPulling = $state(false);
     let pulledCards = $state<Card[]>([]);
@@ -22,6 +49,8 @@
 
     let selectedCards = $state<Set<string>>(new Set());
     let deckConfirmed = $state(false);
+    let fightResult = $state<any>(null);
+
 
     const rarityColors: Record<string, string> = {
         common: 'from-stone-400 to-stone-500 border-stone-300',
@@ -66,7 +95,7 @@
     }
 
     function toggleFlip(cardId: string) {
-        const newFlipped = new Set(flippedCards);
+        const newFlipped = new SvelteSet(flippedCards);
         if (newFlipped.has(cardId)) {
             newFlipped.delete(cardId);
         } else {
@@ -78,7 +107,7 @@
     function toggleCardSelect(cardId: string) {
         if (deckConfirmed) return;
 
-        const newSelected = new Set(selectedCards);
+        const newSelected = new SvelteSet(selectedCards);
         if (newSelected.has(cardId)) {
             newSelected.delete(cardId);
         } else if (newSelected.size < 3) {
@@ -107,8 +136,141 @@
     };
 
     async function sendFightRequest() {
+        const selectedIds = [...selectedCards];
+        if (selectedIds.length !== 3) {
+            console.error('Must select exactly 3 cards');
+            return;
+        }
 
+        // Build player cards from selected IDs
+        const player = pulledCards
+            .filter(c => selectedIds.includes(c.id))
+            .map(({ id, display_name, element, hp, damage }) => ({
+                id,
+                display_name,
+                element,
+                hp,
+                damage,
+            }));
+
+        // Pool is everything the player didn't pick
+        const pool = pulledCards
+            .filter(c => !selectedIds.includes(c.id))
+            .map(({ id, display_name, element, hp, damage }) => ({
+                id,
+                display_name,
+                element,
+                hp,
+                damage,
+            }));
+
+        try {
+            const res = await fetch('/api/fight', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ player, pool }),
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Fight request failed: ${res.status} ${errText}`);
+            }
+
+            const battleResult = await res.json();
+
+            // Store result for the FIGHT/RESULT screens
+            fightResult = battleResult;
+            mode = 'FIGHT';
+            await startBattleAnimation();
+            return battleResult;
+        } catch (err) {
+            console.error('Fight request failed:', err);
+        }
     }
+
+
+    async function startBattleAnimation() {
+        if (!fightResult) return;
+
+        battleLogs = fightResult.logs;
+        currentLogIndex = 0;
+        isAnimating = true;
+
+        // Initialize teams
+        playerTeam = fightResult.playerCards.map((c: BattleCard) => ({...c}));
+        aiTeam = fightResult.aiCards.map((c: BattleCard) => ({...c}));
+
+        // Track HP separately for smooth animation
+        displayPlayerHp = {};
+        displayAiHp = {};
+        playerTeam.forEach(c => displayPlayerHp[c.id] = c.hp);
+        aiTeam.forEach(c => displayAiHp[c.id] = c.hp);
+
+        await runBattleSequence();
+    }
+
+    async function runBattleSequence() {
+        for (let i = 0; i < battleLogs.length; i++) {
+            currentLogIndex = i;
+            const log = battleLogs[i];
+
+            // Phase 1: Attacker moves in
+            animationPhase = 'attacking';
+            await sleep(ANIM_SPEED * 0.4);
+
+            // Phase 2: Show damage
+            animationPhase = 'damaging';
+            await sleep(ANIM_SPEED * 0.3);
+
+            // Apply damage to display HP
+            const isPlayerDefender = playerTeam.some(c => c.display_name === log.defender);
+            if (isPlayerDefender) {
+                const defender = playerTeam.find(c => c.display_name === log.defender);
+                if (defender) {
+                    displayPlayerHp[defender.id] = log.defenderNewHp;
+                    defender.hp = log.defenderNewHp;
+                }
+            } else {
+                const defender = aiTeam.find(c => c.display_name === log.defender);
+                if (defender) {
+                    displayAiHp[defender.id] = log.defenderNewHp;
+                    defender.hp = log.defenderNewHp;
+                }
+            }
+
+            // Phase 3: Knockout check
+            if (log.knockout) {
+                animationPhase = 'knockout';
+                await sleep(ANIM_SPEED * 0.5);
+            }
+
+            await sleep(ANIM_SPEED * 0.3);
+        }
+
+        animationPhase = 'complete';
+        isAnimating = false;
+    }
+
+    function sleep(ms: number) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function getAttackerSide(log: BattleLogEntry): 'player' | 'ai' {
+        return playerTeam.some(c => c.display_name === log.attacker) ? 'player' : 'ai';
+    }
+
+    function isKnockedOut(card: BattleCard, side: 'player' | 'ai'): boolean {
+        const hp = side === 'player' ? displayPlayerHp[card.id] : displayAiHp[card.id];
+        return hp !== undefined && hp <= 0;
+    }
+
+    function getHpPercent(card: BattleCard, side: 'player' | 'ai'): number {
+        const current = side === 'player' ? displayPlayerHp[card.id] : displayAiHp[card.id];
+        const max = fightResult.playerCards.concat(fightResult.aiCards)
+            .find((c: BattleCard) => c.id === card.id)?.hp || 100;
+        return Math.max(0, (current / max) * 100);
+    }
+
 </script>
 
 <style>
@@ -134,6 +296,15 @@
 
     .preserve-3d > div {
         transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+        20%, 40%, 60%, 80% { transform: translateX(4px); }
+    }
+
+    .animate-shake {
+        animation: shake 0.4s ease-in-out;
     }
 </style>
 
@@ -350,7 +521,7 @@
                         ← Pull Again
                     </button>
                     <button
-                            onclick={confirmDeck}
+                            onclick={sendFightRequest}
                             disabled={selectedCards.size !== 3}
                             class="px-10 py-3 rounded-xl font-black text-lg transition-all
 					{selectedCards.size === 3
@@ -361,10 +532,159 @@
                     </button>
                 </div>
             </div>
-        {:else if (mode === "FIGHT")}
-            <div>
+        {:else if mode === 'FIGHT'}
+            <div class="h-full flex flex-col items-center gap-6 p-8">
+                <!-- Battle Arena -->
+                <div class="flex-1 w-full flex items-center justify-between max-w-6xl gap-16">
 
+                    <!-- Player Team -->
+                    <div class="flex flex-col gap-4 items-center">
+                        <h3 class="text-lg font-bold text-blue-400">Your Team</h3>
+                        <div class="flex gap-3">
+                            {#each playerTeam as card}
+                                {@const knocked = isKnockedOut(card, 'player')}
+                                {@const isAttacker = currentLogIndex < battleLogs.length &&
+                                    battleLogs[currentLogIndex].attacker === card.display_name}
+                                {@const isDefender = currentLogIndex < battleLogs.length &&
+                                    battleLogs[currentLogIndex].defender === card.display_name}
+
+                                <div class="relative aspect-[2/3] w-36 rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 transition-all duration-300
+							{knocked ? 'opacity-30 grayscale scale-90' : ''}
+							{isAttacker && animationPhase === 'attacking' ? 'scale-110 -translate-y-4 shadow-2xl shadow-yellow-400/50 z-10' : ''}
+							{isDefender && animationPhase === 'damaging' ? 'animate-shake shadow-2xl shadow-red-500/50' : ''}
+							{isDefender && animationPhase === 'knockout' ? 'opacity-0 scale-75 rotate-12' : ''}"
+                                >
+                                    <!-- HP Bar -->
+                                    <div class="absolute -bottom-3 left-2 right-2 h-2 bg-stone-700 rounded-full overflow-hidden">
+                                        <div
+                                                class="h-full transition-all duration-500 rounded-full {getHpPercent(card, 'player') > 50 ? 'bg-green-400' : getHpPercent(card, 'player') > 25 ? 'bg-yellow-400' : 'bg-red-400'}"
+                                                style="width: {getHpPercent(card, 'player')}%"
+                                        />
+                                    </div>
+
+                                    <div class="absolute top-2 right-2 text-base">
+                                        {elementIcons[card.element] || '❓'}
+                                    </div>
+
+                                    <div class="flex-1 rounded bg-black/20 m-1.5 flex items-center justify-center">
+                                        <div class="text-xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
+                                    </div>
+
+                                    <div class="text-[10px] font-bold text-white text-center mb-1">
+                                        {card.display_name}
+                                    </div>
+
+                                    <div class="text-[10px] text-white/60 text-center mb-2">
+                                        {displayPlayerHp[card.id] ?? card.hp} HP
+                                    </div>
+
+                                    {#if knocked}
+                                        <div class="absolute inset-0 flex items-center justify-center bg-black/50 rounded-xl">
+                                            <span class="text-2xl font-black text-red-400">💀</span>
+                                        </div>
+                                    {/if}
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
+
+                    <!-- VS -->
+                    <div class="text-4xl font-black text-stone-600 animate-pulse">
+                        ⚔️
+                    </div>
+
+                    <!-- AI Team -->
+                    <div class="flex flex-col gap-4 items-center">
+                        <h3 class="text-lg font-bold text-red-400">AI Team</h3>
+                        <div class="flex gap-3">
+                            {#each aiTeam as card}
+                                {@const knocked = isKnockedOut(card, 'ai')}
+                                {@const isAttacker = currentLogIndex < battleLogs.length &&
+                                    battleLogs[currentLogIndex].attacker === card.display_name}
+                                {@const isDefender = currentLogIndex < battleLogs.length &&
+                                    battleLogs[currentLogIndex].defender === card.display_name}
+
+                                <div class="relative aspect-[2/3] w-36 rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 transition-all duration-300
+							{knocked ? 'opacity-30 grayscale scale-90' : ''}
+							{isAttacker && animationPhase === 'attacking' ? 'scale-110 -translate-y-4 shadow-2xl shadow-yellow-400/50 z-10' : ''}
+							{isDefender && animationPhase === 'damaging' ? 'animate-shake shadow-2xl shadow-red-500/50' : ''}
+							{isDefender && animationPhase === 'knockout' ? 'opacity-0 scale-75 rotate-12' : ''}"
+                                >
+                                    <!-- HP Bar -->
+                                    <div class="absolute -bottom-3 left-2 right-2 h-2 bg-stone-700 rounded-full overflow-hidden">
+                                        <div
+                                                class="h-full transition-all duration-500 rounded-full {getHpPercent(card, 'ai') > 50 ? 'bg-green-400' : getHpPercent(card, 'ai') > 25 ? 'bg-yellow-400' : 'bg-red-400'}"
+                                                style="width: {getHpPercent(card, 'ai')}%"
+                                        />
+                                    </div>
+
+                                    <div class="absolute top-2 right-2 text-base">
+                                        {elementIcons[card.element] || '❓'}
+                                    </div>
+
+                                    <div class="flex-1 rounded bg-black/20 m-1.5 flex items-center justify-center">
+                                        <div class="text-xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
+                                    </div>
+
+                                    <div class="text-[10px] font-bold text-white text-center mb-1">
+                                        {card.display_name}
+                                    </div>
+
+                                    <div class="text-[10px] text-white/60 text-center mb-2">
+                                        {displayAiHp[card.id] ?? card.hp} HP
+                                    </div>
+
+                                    {#if knocked}
+                                        <div class="absolute inset-0 flex items-center justify-center bg-black/50 rounded-xl">
+                                            <span class="text-2xl font-black text-red-400">💀</span>
+                                        </div>
+                                    {/if}
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Battle Log -->
+                <div class="w-full max-w-2xl bg-stone-800/50 rounded-xl p-4 backdrop-blur">
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-sm font-bold text-stone-400 uppercase tracking-wider">Battle Log</h4>
+                        {#if animationPhase === 'complete'}
+                            <span class="text-xs font-bold text-amber-400">BATTLE ENDED</span>
+                        {:else}
+                            <span class="text-xs text-stone-500">Step {currentLogIndex + 1} / {battleLogs.length}</span>
+                        {/if}
+                    </div>
+
+                    <div class="h-32 overflow-y-auto space-y-1 text-sm font-mono">
+                        {#each battleLogs.slice(0, currentLogIndex + 1) as log, i}
+                            <div class="flex items-center gap-2 p-1.5 rounded {i === currentLogIndex ? 'bg-amber-400/10 border border-amber-400/30' : ''}">
+                                <span class="text-stone-500 text-xs w-8">#{log.step}</span>
+                                <span class="text-blue-400 font-bold">{log.attacker}</span>
+                                <span class="text-stone-500">→</span>
+                                <span class="text-red-400 font-bold">{log.defender}</span>
+                                <span class="text-stone-500 text-xs">
+							({log.baseDamage} × {log.multiplier.toFixed(1)} = {log.totalDamage})
+						</span>
+                                {#if log.knockout}
+                                    <span class="text-red-500 font-black text-xs ml-auto">KO!</span>
+                                {/if}
+                            </div>
+                        {/each}
+                    </div>
+                </div>
+
+                <!-- End Battle Button -->
+                {#if animationPhase === 'complete'}
+                    <button
+                            onclick={() => mode = 'RESULT'}
+                            class="px-8 py-3 bg-gradient-to-r from-amber-500 to-yellow-400 rounded-xl text-black font-black hover:scale-105 transition-transform"
+                    >
+                        {fightResult?.victory ? '🏆 VICTORY! Continue →' : '💀 Defeat... Continue →'}
+                    </button>
+                {/if}
             </div>
+
         {:else if (mode === "RESULT")}
             <div>
 
