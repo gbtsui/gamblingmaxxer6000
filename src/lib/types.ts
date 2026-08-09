@@ -3,11 +3,11 @@
  * to sum to anything, they get normalized into odds.
  */
 export const RARITY_WEIGHTS = {
-	common: 70,
+	common: 50,
 	uncommon: 20,
-	rare: 8,
-	epic: 4,
-	legendary: 2
+	rare: 15,
+	epic: 10,
+	legendary: 5
 } as const satisfies Record<string, number>;
 
 /**

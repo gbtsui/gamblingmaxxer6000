@@ -1,42 +1,71 @@
-# sv
+# gamblingmaxxer6000
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A Polaris project by Gabriel Tsui, Jenin Henin and Kat Wang
+![screenshot.png](static/screenshot.png)
+## premise
 
-## Creating a project
+> What shifts today may become the foundation of tomorrow.
 
-If you're seeing this, you've probably already done this step. Congrats!
+The underlying system behind most real-life gambling is the idea that the odds are fundamentally equal with every chance.
+This should equalize people. Instead, it makes them broke alcoholics.
 
-```sh
-# create a new project
-npx sv create my-app
-```
+Gacha gambling, on the other hand, often operates with what's known as **pity**. The idea that if you do not win enough,
+your sunk cost will still be helpful -- spend a hundred pulls without getting your desired five-star and your next pull
+will be guaranteed to be one. Fudging the odds based on your failure, so to speak. What is inaccessible "today" becomes
+accessible "tomorrow".
 
-To recreate this project with the same configuration:
+Gamblingmaxxer6000 operates under a similar philosophy. The underlying mechanic is pulling for cards, evidently. 
+Every time you pull a card of a certain value or type, the next round's odds for pulling different values or types 
+will increase.
 
-```sh
-# recreate this project
-npx sv@0.17.0 create --template minimal --types ts --add prettier eslint vitest="usages:unit,component" tailwindcss="plugins:typography,forms" sveltekit-adapter="adapter:auto" --install npm gamblingmaxxer6000
-```
+The core functionality is this pulling. But, you also select a subset of your pulled cards to create your battlesquad in the
+proverbial fight club. The remainder is selected to battle against you. There are cool animations that Jenin did for the 
+fighting.
 
-## Developing
+## pity system
+- pull common cards
+- the game's RNG has pity on you and increases the chances of rarer cards on your next pull
+- pull rare cards
+- the game's RNG stops having pity on you and decreases the chances of rarer cards on your next pull
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
 
-```sh
+## technicalities
+
+The project was made on Sveltekit as its basis. TypeScript was used extensively. All battle, pull calculations are handled 
+on the backend. In my opinion, there's not much to say here.
+
+## running locally
+
+prerequisites:
+- Node.js 20+
+- npm
+
+```bash 
+git clone https://github.com/gbtsui/gamblingmaxxer6000.git
+cd gamblingmaxxer6000
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+open `http://localhost:5173`
 
-To create a production version of your app:
+## credits
 
-```sh
-npm run build
-```
+### gabe
+- backend
+- frontend (prototyping)
+- art (bad)
+### jenin
+- backend
+- frontend (final)
+- animations
+### kat
+- art (good)
+- UI
+- visual design
 
-You can preview the production build with `npm run preview`.
+> > "i dont even know why i code anymore"
+>
+> because you do it for the art you don't just do it for the output
+> - @anirudh
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
