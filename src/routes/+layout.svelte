@@ -5,5 +5,9 @@
 	let { children } = $props();
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<svelte:head>
+	<title>gamblingmaxxer6000 — ten come out, three go in</title>
+	<link rel="icon" href={favicon} />
+</svelte:head>
+
 {@render children()}

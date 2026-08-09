@@ -1,696 +1,293 @@
 <script lang="ts">
-    import {fly, scale} from "svelte/transition"
-    import { flip } from "svelte/animate";
-    import {SvelteSet} from "svelte/reactivity";
-    import type {BattleCard} from "$lib/types";
+	import { fly } from 'svelte/transition';
+	import { SvelteSet } from 'svelte/reactivity';
+	import { pullItems } from '$lib/items';
+	import { TEAM_SIZE, type Item, type PullOdds } from '$lib/types';
+	import Card from '$lib/components/Card.svelte';
+	import CardZoom from '$lib/components/CardZoom.svelte';
+	import OddsBoard from '$lib/components/OddsBoard.svelte';
+	import Sparkle from '$lib/components/Sparkle.svelte';
 
-    type Card = {
-        id: string;
-        display_name: string;
-        image: string;
-        rarity: string;
-        element: string;
-        hp: number;
-        damage: number;
-    }
+	let mode = $state<'PULL' | 'DECK' | 'RING'>('PULL');
 
-    type BattleLogEntry = {
-        step: number;
-        attacker: string;
-        defender: string;
-        attackerElement: Element;
-        defenderElement: Element;
-        baseDamage: number;
-        multiplier: number;
-        totalDamage: number;
-        defenderOldHp: number;
-        defenderNewHp: number;
-        knockout: boolean;
-    };
+	let isPulling = $state(false);
+	let error = $state<string | null>(null);
+	let pulled = $state<Item[]>([]);
+	const revealed = new SvelteSet<string>();
+	const selected = new SvelteSet<string>();
 
-    let mode = $state<"PULL" | "DECK" | "FIGHT" | "RESULT">("PULL")
+	/** Where the odds stand now. Fed back in so the drift carries between pulls. */
+	let odds = $state<PullOdds | null>(null);
+	/** The house baseline, captured from the first pull, for the drift readout. */
+	let baseOdds = $state<PullOdds | null>(null);
 
-    let battleLogs = $state<BattleLogEntry[]>([]);
-    let currentLogIndex = $state(0);
-    let isAnimating = $state(false);
-    let animationPhase = $state<'idle' | 'attacking' | 'damaging' | 'knockout' | 'complete'>('idle');
-    let playerTeam = $state<BattleCard[]>([]);
-    let aiTeam = $state<BattleCard[]>([]);
-    let displayPlayerHp = $state<Record<string, number>>({});
-    let displayAiHp = $state<Record<string, number>>({});
-    const ANIM_SPEED = 1200;
+	const dealing = $derived(pulled.length > 0 && revealed.size < pulled.length);
+	const ready = $derived(selected.size === TEAM_SIZE);
+	const corners = $derived(
+		Array.from({ length: TEAM_SIZE }, (_, i) => pulled.find((c) => c.id === [...selected][i]))
+	);
 
+	// Cards turn themselves over one after another. Waiting for someone to
+	// discover that a card is clickable is a worse first thirty seconds than
+	// just dealing them out; clicking now only skips ahead.
+	let timer: ReturnType<typeof setTimeout> | null = null;
 
-    let isPulling = $state(false);
-    let pulledCards = $state<Card[]>([]);
-    //let showCards = $state(false);
-    let flippedCards = $state<Set<string>>(new Set());
-    let currentOdds = $state<any>(null);
+	function stopDealing() {
+		if (timer) clearTimeout(timer);
+		timer = null;
+	}
 
-    let selectedCards = $state<Set<string>>(new Set());
-    let deckConfirmed = $state(false);
-    let fightResult = $state<any>(null);
+	function dealOutFrom(i: number) {
+		if (i >= pulled.length) return stopDealing();
+		revealed.add(pulled[i].id);
+		timer = setTimeout(() => dealOutFrom(i + 1), 230);
+	}
 
+	function turnAllOver() {
+		stopDealing();
+		for (const card of pulled) revealed.add(card.id);
+	}
 
-    const rarityColors: Record<string, string> = {
-        common: 'from-stone-400 to-stone-500 border-stone-300',
-        uncommon: 'from-green-500 to-emerald-600 border-green-300',
-        rare: 'from-blue-500 to-indigo-600 border-blue-300',
-        epic: 'from-purple-500 to-violet-600 border-purple-300',
-        legendary: 'from-amber-400 to-yellow-500 border-yellow-200'
-    };
+	$effect(() => stopDealing);
 
-    const rarityGlow: Record<string, string> = {
-        common: 'shadow-stone-400/20',
-        uncommon: 'shadow-green-400/30',
-        rare: 'shadow-blue-400/40',
-        epic: 'shadow-purple-400/50',
-        legendary: 'shadow-yellow-400/60'
-    };
+	async function pull() {
+		if (isPulling) return;
+		stopDealing();
+		isPulling = true;
+		error = null;
+		revealed.clear();
+		selected.clear();
+		pulled = [];
 
-    async function pullCards() {
-        if (isPulling) return;
-        isPulling = true;
-        flippedCards = new Set(); // Reset all flips
-        pulledCards = [];
+		try {
+			const data = await pullItems({ odds: odds ?? undefined });
 
-        try {
-            const res = await fetch('/api/items/random', {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    odds: currentOdds
-                })
-            });
-            const data = await res.json();
+			pulled = data.items;
+			odds = data.odds.current;
+			baseOdds ??= data.odds.initial;
 
-            pulledCards = data.items;
-            currentOdds = data.odds;
+			timer = setTimeout(() => dealOutFrom(0), 500);
+		} catch (err) {
+			console.error(err);
+			error = 'the machine returned nothing.';
+		} finally {
+			isPulling = false;
+		}
+	}
 
-            // No more delay needed - cards appear face-down immediately
-        } catch (err) {
-            console.error('Pull failed:', err);
-        } finally {
-            isPulling = false;
-        }
-    }
+	function toggleCorner(id: string) {
+		if (selected.has(id)) selected.delete(id);
+		else if (selected.size < TEAM_SIZE) selected.add(id);
+	}
 
-    function toggleFlip(cardId: string) {
-        const newFlipped = new SvelteSet(flippedCards);
-        if (newFlipped.has(cardId)) {
-            newFlipped.delete(cardId);
-        } else {
-            newFlipped.add(cardId);
-        }
-        flippedCards = newFlipped;
-    }
+	let zoomed = $state<Item | null>(null);
+	let returnFocusTo: HTMLElement | null = null;
 
-    function toggleCardSelect(cardId: string) {
-        if (deckConfirmed) return;
+	function zoom(card: Item) {
+		returnFocusTo = document.activeElement as HTMLElement | null;
+		zoomed = card;
+	}
 
-        const newSelected = new SvelteSet(selectedCards);
-        if (newSelected.has(cardId)) {
-            newSelected.delete(cardId);
-        } else if (newSelected.size < 3) {
-            newSelected.add(cardId);
-        }
-        selectedCards = newSelected;
-    }
-
-    function confirmDeck() {
-        if (selectedCards.size !== 3) return;
-        deckConfirmed = true;
-        mode = 'FIGHT';
-    }
-
-    // Element icons/emojis
-    const elementIcons: Record<string, string> = {
-        water: '💧',
-        fire: '🔥',
-        ice: '❄️',
-        air: '🌪️',
-        metal: '⚙️',
-        void: '🌑',
-        socratic: '📜',
-        tung_descendant: '⚡',
-        grimble: '👁️'
-    };
-
-    async function sendFightRequest() {
-        const selectedIds = [...selectedCards];
-        if (selectedIds.length !== 3) {
-            console.error('Must select exactly 3 cards');
-            return;
-        }
-
-        // Build player cards from selected IDs
-        const player = pulledCards
-            .filter(c => selectedIds.includes(c.id))
-            .map(({ id, display_name, element, hp, damage }) => ({
-                id,
-                display_name,
-                element,
-                hp,
-                damage,
-            }));
-
-        // Pool is everything the player didn't pick
-        const pool = pulledCards
-            .filter(c => !selectedIds.includes(c.id))
-            .map(({ id, display_name, element, hp, damage }) => ({
-                id,
-                display_name,
-                element,
-                hp,
-                damage,
-            }));
-
-        try {
-            const res = await fetch('/api/battle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ player, pool }),
-            });
-
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`Fight request failed: ${res.status} ${errText}`);
-            }
-
-            const battleResult = await res.json();
-
-            // Store result for the FIGHT/RESULT screens
-            fightResult = battleResult;
-            mode = 'FIGHT';
-            await startBattleAnimation();
-            return battleResult;
-        } catch (err) {
-            console.error('Fight request failed:', err);
-        }
-    }
-
-
-    async function startBattleAnimation() {
-        if (!fightResult) return;
-
-        battleLogs = fightResult.logs;
-        currentLogIndex = 0;
-        isAnimating = true;
-
-        // Initialize teams
-        playerTeam = fightResult.playerCards.map((c: BattleCard) => ({...c}));
-        aiTeam = fightResult.aiCards.map((c: BattleCard) => ({...c}));
-
-        // Track HP separately for smooth animation
-        displayPlayerHp = {};
-        displayAiHp = {};
-        playerTeam.forEach(c => displayPlayerHp[c.id] = c.hp);
-        aiTeam.forEach(c => displayAiHp[c.id] = c.hp);
-
-        await runBattleSequence();
-    }
-
-    async function runBattleSequence() {
-        for (let i = 0; i < battleLogs.length; i++) {
-            currentLogIndex = i;
-            const log = battleLogs[i];
-
-            // Phase 1: Attacker moves in
-            animationPhase = 'attacking';
-            await sleep(ANIM_SPEED * 0.4);
-
-            // Phase 2: Show damage
-            animationPhase = 'damaging';
-            await sleep(ANIM_SPEED * 0.3);
-
-            // Apply damage to display HP
-            const isPlayerDefender = playerTeam.some(c => c.display_name === log.defender);
-            if (isPlayerDefender) {
-                const defender = playerTeam.find(c => c.display_name === log.defender);
-                if (defender) {
-                    displayPlayerHp[defender.id] = log.defenderNewHp;
-                    defender.hp = log.defenderNewHp;
-                }
-            } else {
-                const defender = aiTeam.find(c => c.display_name === log.defender);
-                if (defender) {
-                    displayAiHp[defender.id] = log.defenderNewHp;
-                    defender.hp = log.defenderNewHp;
-                }
-            }
-
-            // Phase 3: Knockout check
-            if (log.knockout) {
-                animationPhase = 'knockout';
-                await sleep(ANIM_SPEED * 0.5);
-            }
-
-            await sleep(ANIM_SPEED * 0.3);
-        }
-
-        animationPhase = 'complete';
-        isAnimating = false;
-    }
-
-    function sleep(ms: number) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    function getAttackerSide(log: BattleLogEntry): 'player' | 'ai' {
-        return playerTeam.some(c => c.display_name === log.attacker) ? 'player' : 'ai';
-    }
-
-    function isKnockedOut(card: BattleCard, side: 'player' | 'ai'): boolean {
-        const hp = side === 'player' ? displayPlayerHp[card.id] : displayAiHp[card.id];
-        return hp !== undefined && hp <= 0;
-    }
-
-    function getHpPercent(card: BattleCard, side: 'player' | 'ai'): number {
-        const current = side === 'player' ? displayPlayerHp[card.id] : displayAiHp[card.id];
-        const max = fightResult.playerCards.concat(fightResult.aiCards)
-            .find((c: BattleCard) => c.id === card.id)?.hp || 100;
-        return Math.max(0, (current / max) * 100);
-    }
-
+	function closeZoom() {
+		zoomed = null;
+		returnFocusTo?.focus();
+		returnFocusTo = null;
+	}
 </script>
 
-<style>
-    .preserve-3d {
-        transform-style: preserve-3d;
-    }
+<!-- The wall photo carries its own lamps and vignette, so the only layer over
+     it is a little extra falloff at the edges. -->
+<div class="relative min-h-dvh">
+	<div class="pointer-events-none fixed inset-0 z-0 room-ground" aria-hidden="true"></div>
+	<div class="pointer-events-none fixed inset-0 z-0 vignette" aria-hidden="true"></div>
 
-    .backface-hidden {
-        backface-visibility: hidden;
-    }
+	<div class="relative z-10 flex min-h-dvh flex-col text-chalk">
+		<header class="mx-auto flex w-full max-w-6xl items-center gap-2.5 px-4 py-5 sm:px-6">
+			<Sparkle class="w-6 shrink-0 text-lamp drop-shadow-[0_0.2rem_0_var(--color-ink)]" />
+			<span class="text-xl font-black tracking-[-0.055em]">gamblingmaxxer6000</span>
+			<span class="ml-auto micro">set 297</span>
+		</header>
 
-    .rotate-y-180 {
-        transform: rotateY(180deg);
-    }
+		<main class="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 sm:px-6">
+			{#if mode === 'PULL'}
+				<section class="flex flex-col items-center gap-8 text-center">
+					<div class="space-y-3 pt-4">
+						<h2 class="text-4xl hard-shadow sm:text-6xl">ten come out. three go in.</h2>
+						<p class="text-base text-chalk/85 italic sm:text-lg">
+							you keep one of your three. we print it and hand it to you.
+						</p>
+					</div>
 
-    .flipped .rotate-y-180 {
-        transform: rotateY(0deg);
-    }
+					<button
+						onclick={pull}
+						disabled={isPulling}
+						class="slab bg-lamp px-10 py-5 text-3xl text-ink hover:bg-lamp-bright
+						       disabled:cursor-wait disabled:opacity-60 sm:px-14 sm:py-6 sm:text-5xl"
+					>
+						{isPulling ? 'pulling' : 'pull ×10'}
+					</button>
 
-    .flipped .backface-hidden:first-child {
-        transform: rotateY(180deg);
-    }
+					{#if error}
+						<p class="text-sm font-bold text-lamp" role="alert">{error} pull again.</p>
+					{/if}
 
-    .preserve-3d > div {
-        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    @keyframes shake {
-        0%, 100% { transform: translateX(0); }
-        10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-        20%, 40%, 60%, 80% { transform: translateX(4px); }
-    }
+					{#if pulled.length > 0}
+						<!-- The night's sheet, taped to the wall. -->
+						<div class="relative w-full" transition:fly={{ y: 16, duration: 350 }}>
+							<span class="absolute -top-2 left-8 z-20 h-6 w-16 -rotate-6 tape"></span>
+							<span class="absolute -top-2 right-8 z-20 h-6 w-16 rotate-3 tape"></span>
 
-    .animate-shake {
-        animation: shake 0.4s ease-in-out;
-    }
-</style>
+							<div class="panel px-3 py-5 sm:px-5">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<span class="micro">{revealed.size} of {pulled.length} turned over</span>
+									{#if dealing}
+										<button
+											onclick={turnAllOver}
+											class="micro text-chalk/70! underline underline-offset-4 hover:text-lamp!"
+										>
+											show me all of them
+										</button>
+									{/if}
+								</div>
 
-<div class="h-[100vh] w-[100vw] flex flex-col bg-gradient-to-b from-stone-800 to-stone-900 overflow-hidden text-stone-300">
-    <div class="w-[100vw] h-[5rem] text-xl bg-stone-800 text-center justify-center items-center flex ">GAMBLINGMAXXER6000</div>
+								<ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-5">
+									{#each pulled as card, i (card.id)}
+										<li in:fly={{ y: 24, duration: 380, delay: i * 40 }}>
+											<!-- While they're still landing a tap skips ahead; once
+											     they're all up, a tap opens the card. -->
+											<Card
+												{card}
+												revealed={revealed.has(card.id)}
+												onactivate={() => (dealing ? turnAllOver() : zoom(card))}
+												action={dealing ? 'turn them all over' : 'see the whole card'}
+											/>
+										</li>
+									{/each}
+								</ul>
+							</div>
+						</div>
 
-        <!--asdfhkahsfdlkjhsalkfha
+						<button
+							onclick={() => (mode = 'DECK')}
+							class="slab bg-chalk px-9 py-4 text-2xl text-ink hover:bg-white sm:text-3xl"
+						>
+							pick three →
+						</button>
+					{/if}
 
-        - pull screen with cool animation
-        - deck select screen
-        - fight animation screen
-        - result screen that caches the current odds and results
+					{#if odds}
+						<div class="w-full max-w-3xl text-left">
+							<OddsBoard current={odds} base={baseOdds} />
+						</div>
+					{/if}
+				</section>
+			{:else if mode === 'DECK'}
+				<section class="flex flex-col gap-9 pt-4">
+					<div class="text-center">
+						<h2 class="text-4xl hard-shadow sm:text-5xl">pick three</h2>
+						<p class="mt-3 text-chalk/85 italic">
+							the other seven stay on the floor. one of these three is yours to keep.
+						</p>
+					</div>
 
+					<div class="mx-auto grid w-full max-w-2xl grid-cols-3 gap-4 sm:gap-6">
+						{#each corners as card, i (i)}
+							<div class="space-y-2">
+								<span class="block text-center micro">corner {i + 1}</span>
 
-        -->
+								{#if card}
+									<Card
+										{card}
+										selected
+										corner={i + 1}
+										onactivate={() => toggleCorner(card.id)}
+										action="take out of the corner"
+										onzoom={() => zoom(card)}
+									/>
+								{:else}
+									<div
+										class="flex aspect-card items-center justify-center rounded-[6%]
+										       border-4 border-dashed border-ink/70 bg-black/25"
+									>
+										<Sparkle class="w-1/4 text-white/15" />
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
 
-    <main class="flex-1 mt-[3rem]">
-        {#if (mode === "PULL")}
-            <div class="h-full flex flex-col items-center justify-start gap-8 transition-all">
-                <button onclick={pullCards} disabled={isPulling} class="relative group cursor-pointer">
-                    <span class="absolute inset-0 bg-gradient-to-r from-amber-400 to-yellow-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity"></span>
-                    <span class="relative px-12 py-6 bg-gradient-to-r from-amber-500 to-yellow-400 rounded-2xl text-black font-black text-2xl transform transition-all hover:scale-105 active:scale-95">
-                        {#if isPulling}
-							<!--
-                            <span class="flex items-center gap-3">
-                                <span class="inline-block w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
-								PULLING...
-							</span>
-							-->
-                            pulling...
-                        {:else}
-                            gamblecore: pull x10
-                        {/if}
-                    </span>
-                </button>
-                <!--cardgrid-->
+					<div>
+						<span class="mb-3 block micro">on the floor</span>
+						<ul class="grid grid-cols-3 gap-3 sm:grid-cols-5 sm:gap-5">
+							{#each pulled as card (card.id)}
+								<li>
+									<!-- Picking is the job on this screen, so a tap does that and
+									     the corner button is what opens the card. -->
+									<Card
+										{card}
+										selected={selected.has(card.id)}
+										muted={ready && !selected.has(card.id)}
+										onactivate={() => toggleCorner(card.id)}
+										action={selected.has(card.id) ? 'take out of the corner' : 'put in a corner'}
+										onzoom={() => zoom(card)}
+									/>
+								</li>
+							{/each}
+						</ul>
+					</div>
 
-                {#if pulledCards.length > 0}
-                    <div class="grid grid-cols-5 gap-4 px-8 max-w-6xl w-full">
-                        {#each pulledCards as card, i (i)}
-                            <div
-                                    class="relative aspect-[2/3] transform transition-all duration-500 cursor-pointer hover:scale-110 hover:z-10"
-                                    style="transition-delay: {i * 50}ms"
-                                    transition:fly={{duration: 500, delay: i * 50}}
-                                    onclick={() => toggleFlip(card.id)}
-                            >
-                                <!-- Card Container with Flip -->
-                                <div class="relative w-full h-full preserve-3d" class:flipped={flippedCards.has(card.id)}>
-                                    <!-- Back of Card -->
-                                    <div class="absolute inset-0 backface-hidden rounded-xl bg-gradient-to-br from-stone-600 to-stone-800 border-2 border-stone-500 shadow-2xl flex items-center justify-center">
-                                        <!--
-                                        <div class="text-4xl opacity-50">🂠</div>-->
+					<div class="flex flex-wrap items-center justify-center gap-5">
+						<button
+							onclick={() => (mode = 'PULL')}
+							class="slab bg-wall-lit px-7 py-3.5 text-xl text-ink hover:bg-chalk"
+						>
+							← pull again
+						</button>
 
-                                        <div class="absolute bottom-2 text-[10px] text-stone-400">click to reveal</div>
-                                    </div>
+						<button
+							onclick={() => (mode = 'RING')}
+							disabled={!ready}
+							class="slab px-9 py-3.5 text-2xl text-ink
+							       {ready ? 'bg-lamp hover:bg-lamp-bright' : 'cursor-not-allowed bg-wall-lit/40 text-chalk/40'}"
+						>
+							{ready ? 'send them in' : `${selected.size} of ${TEAM_SIZE} picked`}
+						</button>
+					</div>
+				</section>
+			{:else}
+				<!-- The bout resolver exists; the room it happens in doesn't yet. -->
+				<section class="mx-auto flex max-w-xl flex-col items-center gap-7 py-16 text-center">
+					<Sparkle class="w-12 text-lamp drop-shadow-[0_0.25rem_0_var(--color-ink)]" />
 
-                                    <!-- Front of Card -->
-                                    <div class="absolute inset-0 backface-hidden rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} shadow-2xl {rarityGlow[card.rarity] || rarityGlow.common} flex flex-col rotate-y-180">
-                                        {#if card.image}
-                                            <img src={card.image} alt={card.display_name} class="w-full h-full object-cover" />
-                                        {:else}
-                                            <div class="text-3xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                        {/if}
-                                        <!--
-                                        <div class="absolute top-2 right-2 text-2xl">
-                                            {elementIcons[card.element] || '❓'}
-                                        </div>
+					<div class="space-y-3">
+						<h2 class="text-4xl hard-shadow">the ring isn't built yet</h2>
+						<p class="text-lg text-chalk/85 italic">
+							the bout resolver works — it settles a fight round by round, element matchups and all.
+							the room it happens in doesn't.
+						</p>
+					</div>
 
-                                        <div class="flex-1 rounded-lg bg-black/20 mb-2 flex items-center justify-center overflow-hidden">
-                                            {#if card.image}
-                                                <img src={card.image} alt={card.display_name} class="w-full h-full object-cover" />
-                                            {:else}
-                                                <div class="text-3xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                            {/if}
-                                        </div>
+					<p class="panel px-5 py-4 text-sm text-chalk/85">
+						when it is: your three fight three of the seven you left behind. then you pick one of
+						your three to keep, and we print it and hand it to you.
+					</p>
 
-                                        <div class="text-xs font-bold text-center text-white drop-shadow-lg truncate">
-                                            {card.display_name}
-                                        </div>
+					<button
+						onclick={() => (mode = 'DECK')}
+						class="slab bg-chalk px-8 py-3.5 text-xl text-ink hover:bg-white"
+					>
+						← back to the floor
+					</button>
+				</section>
+			{/if}
+		</main>
 
-                                        <div class="flex justify-between text-[10px] text-white/80 mt-1">
-                                            <span>❤️ {card.hp}</span>
-                                            <span>⚔️ {card.damage}</span>
-                                        </div>
-
-                                        <div class="absolute top-2 left-2 text-[10px] font-medium bg-black/30 rounded px-1.5 py-0.5 text-white/70">
-                                            {card.rarity}
-                                        </div>
-                                        -->
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
-
-                    <!-- Action Button -->
-                    <button
-                            onclick={() => mode = 'DECK'}
-                            class="px-8 py-3 bg-stone-700 hover:bg-stone-600 rounded-xl font-bold transition-colors"
-                    >
-                        Select Your Deck ->
-                    </button>
-                {/if}
-
-            </div>
-        {:else if mode === 'DECK'}
-            <div class="h-full flex flex-col items-center justify-center gap-8 p-8">
-                <!-- Selected Cards Showcase -->
-                <div class="flex gap-6 h-64 items-end">
-                    {#each Array(3) as _, slot (slot)}
-                        {#if [...selectedCards][slot]}
-                            {@const card = pulledCards.find(c => c.id === [...selectedCards][slot])}
-                            {#if card}
-                                <div class="aspect-[2/3] h-full rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 shadow-2xl {rarityGlow[card.rarity] || rarityGlow.common} flex flex-col p-3 transition-all duration-300 hover:scale-105 cursor-pointer"
-                                     onclick={() => toggleCardSelect(card.id)}
-                                >
-                                    <div class="absolute -top-2 -right-2 w-6 h-6 bg-amber-400 rounded-full flex items-center justify-center text-black font-black text-xs z-10">
-                                        {slot + 1}
-                                    </div>
-                                    <div class="absolute top-2 right-2 text-lg">
-                                        {elementIcons[card.element] || '❓'}
-                                    </div>
-                                    <div class="flex-1 rounded-lg bg-black/20 m-1 flex items-center justify-center overflow-hidden">
-                                        {#if card.image}
-                                            <img src={card.image} alt={card.display_name} class="w-full h-full object-cover rounded" />
-                                        {:else}
-                                            <div class="text-2xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                        {/if}
-                                    </div>
-                                    <div class="text-[10px] font-bold text-center text-white drop-shadow-lg leading-tight">
-                                        {card.display_name}
-                                    </div>
-                                    <div class="flex justify-center gap-3 text-[9px] text-white/70 mt-0.5">
-                                        <span>❤️ {card.hp}</span>
-                                        <span>⚔️ {card.damage}</span>
-                                    </div>
-                                    <div class="absolute top-2 left-2 text-[8px] font-black uppercase bg-black/30 rounded px-1 py-0.5 text-white/70">
-                                        {card.rarity}
-                                    </div>
-                                </div>
-                            {/if}
-                        {:else}
-                            <!-- Empty Slot -->
-                            <div class="aspect-[2/3] h-full rounded-xl border-2 border-dashed border-stone-600 bg-stone-800/50 flex items-center justify-center">
-                                <div class="text-4xl text-stone-600 opacity-30">+</div>
-                            </div>
-                        {/if}
-                    {/each}
-                </div>
-
-                <!-- Selection Counter -->
-                <div class="text-center">
-                    <p class="text-lg font-bold {selectedCards.size === 3 ? 'text-amber-400' : 'text-stone-400'}">
-                        {selectedCards.size} / 3 Selected
-                    </p>
-                    {#if selectedCards.size === 3}
-                        <p class="text-sm text-amber-400/70">Ready for battle!</p>
-                    {/if}
-                </div>
-
-                <!-- Card Selection Row -->
-                <div class="flex gap-3 justify-center flex-wrap max-w-5xl">
-                    {#each pulledCards as card (card)}
-                        <button
-                                onclick={() => toggleCardSelect(card.id)}
-                                disabled={selectedCards.size >= 3 && !selectedCards.has(card.id)}
-                                class="relative aspect-[2/3] h-44 rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 transition-all
-						{selectedCards.has(card.id)
-							? 'ring-4 ring-amber-400 scale-105 shadow-2xl shadow-amber-400/50 -translate-y-2'
-							: selectedCards.size >= 3
-								? 'opacity-30 grayscale cursor-not-allowed'
-								: 'opacity-80 hover:opacity-100 hover:scale-105 hover:-translate-y-1'}"
-                        >
-                            {#if selectedCards.has(card.id)}
-                                <div class="absolute -top-2 -right-2 w-6 h-6 bg-amber-400 rounded-full flex items-center justify-center text-black font-black text-xs z-10">
-                                    ✓
-                                </div>
-                            {/if}
-
-                            <div class="absolute top-1.5 right-1.5 text-base">
-                                {elementIcons[card.element] || '❓'}
-                            </div>
-
-                            <div class="flex-1 rounded bg-black/20 m-1.5 flex items-center justify-center overflow-hidden" style="height: calc(100% - 3.5rem)">
-                                {#if card.image}
-                                    <img src={card.image} alt={card.display_name} class="w-full h-full object-cover rounded" />
-                                {:else}
-                                    <div class="text-lg opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                {/if}
-                            </div>
-
-                            <div class="text-[10px] font-bold text-white drop-shadow-lg absolute bottom-7 left-0 right-0 text-center px-1 leading-tight">
-                                {card.display_name}
-                            </div>
-
-                            <div class="absolute bottom-1.5 left-0 right-0 flex justify-center gap-2 text-[9px] text-white/70">
-                                <span>❤️ {card.hp}</span>
-                                <span>⚔️ {card.damage}</span>
-                            </div>
-
-                            <div class="absolute top-1.5 left-1.5 text-[8px] font-black uppercase bg-black/30 rounded px-1 py-0.5 text-white/70">
-                                {card.rarity}
-                            </div>
-                        </button>
-                    {/each}
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="flex gap-4 mt-2">
-                    <button
-                            onclick={() => mode = 'PULL'}
-                            class="px-6 py-3 bg-stone-700 hover:bg-stone-600 rounded-xl font-bold transition-colors"
-                    >
-                        ← Pull Again
-                    </button>
-                    <button
-                            onclick={sendFightRequest}
-                            disabled={selectedCards.size !== 3}
-                            class="px-10 py-3 rounded-xl font-black text-lg transition-all
-					{selectedCards.size === 3
-						? 'bg-gradient-to-r from-red-500 to-orange-500 text-white hover:scale-105 shadow-lg shadow-red-500/30 cursor-pointer'
-						: 'bg-stone-700 text-stone-500 cursor-not-allowed'}"
-                    >
-                        ⚔️ FIGHT!
-                    </button>
-                </div>
-            </div>
-        {:else if mode === 'FIGHT'}
-            <div class="h-full flex flex-col items-center gap-6 p-8">
-                <!-- Battle Arena -->
-                <div class="flex-1 w-full flex items-center justify-between max-w-6xl gap-16">
-
-                    <!-- Player Team -->
-                    <div class="flex flex-col gap-4 items-center">
-                        <h3 class="text-lg font-bold text-blue-400">Your Team</h3>
-                        <div class="flex gap-3">
-                            {#each playerTeam as card}
-                                {@const knocked = isKnockedOut(card, 'player')}
-                                {@const isAttacker = currentLogIndex < battleLogs.length &&
-                                    battleLogs[currentLogIndex].attacker === card.display_name}
-                                {@const isDefender = currentLogIndex < battleLogs.length &&
-                                    battleLogs[currentLogIndex].defender === card.display_name}
-
-                                <div class="relative aspect-[2/3] w-36 rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 transition-all duration-300
-							{knocked ? 'opacity-30 grayscale scale-90' : ''}
-							{isAttacker && animationPhase === 'attacking' ? 'scale-110 -translate-y-4 shadow-2xl shadow-yellow-400/50 z-10' : ''}
-							{isDefender && animationPhase === 'damaging' ? 'animate-shake shadow-2xl shadow-red-500/50' : ''}
-							{isDefender && animationPhase === 'knockout' ? 'opacity-0 scale-75 rotate-12' : ''}"
-                                >
-                                    <!-- HP Bar -->
-                                    <div class="absolute -bottom-3 left-2 right-2 h-2 bg-stone-700 rounded-full overflow-hidden">
-                                        <div
-                                                class="h-full transition-all duration-500 rounded-full {getHpPercent(card, 'player') > 50 ? 'bg-green-400' : getHpPercent(card, 'player') > 25 ? 'bg-yellow-400' : 'bg-red-400'}"
-                                                style="width: {getHpPercent(card, 'player')}%"
-                                        />
-                                    </div>
-
-                                    <div class="absolute top-2 right-2 text-base">
-                                        {elementIcons[card.element] || '❓'}
-                                    </div>
-
-                                    <div class="flex-1 rounded bg-black/20 m-1.5 flex items-center justify-center">
-                                        <div class="text-xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                    </div>
-
-                                    <div class="text-[10px] font-bold text-white text-center mb-1">
-                                        {card.display_name}
-                                    </div>
-
-                                    <div class="text-[10px] text-white/60 text-center mb-2">
-                                        {displayPlayerHp[card.id] ?? card.hp} HP
-                                    </div>
-
-                                    {#if knocked}
-                                        <div class="absolute inset-0 flex items-center justify-center bg-black/50 rounded-xl">
-                                            <span class="text-2xl font-black text-red-400">💀</span>
-                                        </div>
-                                    {/if}
-                                </div>
-                            {/each}
-                        </div>
-                    </div>
-
-                    <!-- VS -->
-                    <div class="text-4xl font-black text-stone-600 animate-pulse">
-                        ⚔️
-                    </div>
-
-                    <!-- AI Team -->
-                    <div class="flex flex-col gap-4 items-center">
-                        <h3 class="text-lg font-bold text-red-400">AI Team</h3>
-                        <div class="flex gap-3">
-                            {#each aiTeam as card}
-                                {@const knocked = isKnockedOut(card, 'ai')}
-                                {@const isAttacker = currentLogIndex < battleLogs.length &&
-                                    battleLogs[currentLogIndex].attacker === card.display_name}
-                                {@const isDefender = currentLogIndex < battleLogs.length &&
-                                    battleLogs[currentLogIndex].defender === card.display_name}
-
-                                <div class="relative aspect-[2/3] w-36 rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 transition-all duration-300
-							{knocked ? 'opacity-30 grayscale scale-90' : ''}
-							{isAttacker && animationPhase === 'attacking' ? 'scale-110 -translate-y-4 shadow-2xl shadow-yellow-400/50 z-10' : ''}
-							{isDefender && animationPhase === 'damaging' ? 'animate-shake shadow-2xl shadow-red-500/50' : ''}
-							{isDefender && animationPhase === 'knockout' ? 'opacity-0 scale-75 rotate-12' : ''}"
-                                >
-                                    <!-- HP Bar -->
-                                    <div class="absolute -bottom-3 left-2 right-2 h-2 bg-stone-700 rounded-full overflow-hidden">
-                                        <div
-                                                class="h-full transition-all duration-500 rounded-full {getHpPercent(card, 'ai') > 50 ? 'bg-green-400' : getHpPercent(card, 'ai') > 25 ? 'bg-yellow-400' : 'bg-red-400'}"
-                                                style="width: {getHpPercent(card, 'ai')}%"
-                                        />
-                                    </div>
-
-                                    <div class="absolute top-2 right-2 text-base">
-                                        {elementIcons[card.element] || '❓'}
-                                    </div>
-
-                                    <div class="flex-1 rounded bg-black/20 m-1.5 flex items-center justify-center">
-                                        <div class="text-xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                    </div>
-
-                                    <div class="text-[10px] font-bold text-white text-center mb-1">
-                                        {card.display_name}
-                                    </div>
-
-                                    <div class="text-[10px] text-white/60 text-center mb-2">
-                                        {displayAiHp[card.id] ?? card.hp} HP
-                                    </div>
-
-                                    {#if knocked}
-                                        <div class="absolute inset-0 flex items-center justify-center bg-black/50 rounded-xl">
-                                            <span class="text-2xl font-black text-red-400">💀</span>
-                                        </div>
-                                    {/if}
-                                </div>
-                            {/each}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Battle Log -->
-                <div class="w-full max-w-2xl bg-stone-800/50 rounded-xl p-4 backdrop-blur">
-                    <div class="flex items-center justify-between mb-2">
-                        <h4 class="text-sm font-bold text-stone-400 uppercase tracking-wider">Battle Log</h4>
-                        {#if animationPhase === 'complete'}
-                            <span class="text-xs font-bold text-amber-400">BATTLE ENDED</span>
-                        {:else}
-                            <span class="text-xs text-stone-500">Step {currentLogIndex + 1} / {battleLogs.length}</span>
-                        {/if}
-                    </div>
-
-                    <div class="h-32 overflow-y-auto space-y-1 text-sm font-mono">
-                        {#each battleLogs.slice(0, currentLogIndex + 1) as log, i}
-                            <div class="flex items-center gap-2 p-1.5 rounded {i === currentLogIndex ? 'bg-amber-400/10 border border-amber-400/30' : ''}">
-                                <span class="text-stone-500 text-xs w-8">#{log.step}</span>
-                                <span class="text-blue-400 font-bold">{log.attacker}</span>
-                                <span class="text-stone-500">→</span>
-                                <span class="text-red-400 font-bold">{log.defender}</span>
-                                <span class="text-stone-500 text-xs">
-							({log.baseDamage} × {log.multiplier.toFixed(1)} = {log.totalDamage})
-						</span>
-                                {#if log.knockout}
-                                    <span class="text-red-500 font-black text-xs ml-auto">KO!</span>
-                                {/if}
-                            </div>
-                        {/each}
-                    </div>
-                </div>
-
-                <!-- End Battle Button -->
-                {#if animationPhase === 'complete'}
-                    <button
-                            onclick={() => mode = 'RESULT'}
-                            class="px-8 py-3 bg-gradient-to-r from-amber-500 to-yellow-400 rounded-xl text-black font-black hover:scale-105 transition-transform"
-                    >
-                        {fightResult?.victory ? '🏆 VICTORY! Continue →' : '💀 Defeat... Continue →'}
-                    </button>
-                {/if}
-            </div>
-
-        {:else if (mode === "RESULT")}
-            <div>
-
-            </div>
-        {/if}
-    </main>
+		<footer class="mx-auto w-full max-w-6xl px-4 pb-8 sm:px-6">
+			<p class="text-center micro">gamblingmaxxer6000 · set 297 · art by kat wang</p>
+		</footer>
+	</div>
 </div>
 
+{#if zoomed}
+	<CardZoom card={zoomed} onclose={closeZoom} />
+{/if}
