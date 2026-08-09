@@ -87,7 +87,12 @@ function readWeight(raw: string | null, field: string): number | undefined {
 }
 
 function readOdds(raw: unknown): PullOdds {
-	if (typeof raw !== 'object' || raw === null) error(400, 'odds must be an object');
+	if (typeof raw !== 'object' || raw === null) {
+		return {
+			rarity: BASE_RARITY_ODDS,
+			element: BASE_ELEMENT_ODDS
+		}
+	}//error(400, 'odds must be an object');
 	const { rarity, element } = raw as Record<string, unknown>;
 
 	return {

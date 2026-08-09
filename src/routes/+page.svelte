@@ -49,7 +49,7 @@
             const res = await fetch('/api/items/random', {
                 method: "POST",
                 body: JSON.stringify({
-
+                    odds: currentOdds
                 })
             });
             const data = await res.json();
