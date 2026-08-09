@@ -1,293 +1,184 @@
 <script lang="ts">
-	import { fly } from 'svelte/transition';
-	import { SvelteSet } from 'svelte/reactivity';
-	import { pullItems } from '$lib/items';
-	import { TEAM_SIZE, type Item, type PullOdds } from '$lib/types';
-	import Card from '$lib/components/Card.svelte';
-	import CardZoom from '$lib/components/CardZoom.svelte';
-	import OddsBoard from '$lib/components/OddsBoard.svelte';
-	import Sparkle from '$lib/components/Sparkle.svelte';
+	import { resolve } from '$app/paths';
+	import type { PageProps } from './$types';
 
-	let mode = $state<'PULL' | 'DECK' | 'RING'>('PULL');
+	let { data }: PageProps = $props();
 
-	let isPulling = $state(false);
-	let error = $state<string | null>(null);
-	let pulled = $state<Item[]>([]);
-	const revealed = new SvelteSet<string>();
-	const selected = new SvelteSet<string>();
+	/**
+	 * The strip is laid down twice back to back. The scroll animation travels
+	 * exactly one copy's width and restarts, so the seam never shows and the
+	 * second copy costs nothing to load — it's the same eight files.
+	 */
+	const strip = $derived([...data.strip, ...data.strip]);
+</script>
 
-	/** Where the odds stand now. Fed back in so the drift carries between pulls. */
-	let odds = $state<PullOdds | null>(null);
-	/** The house baseline, captured from the first pull, for the drift readout. */
-	let baseOdds = $state<PullOdds | null>(null);
+<svelte:head>
+	<title>Gamblingmaxxer</title>
+</svelte:head>
 
-	const dealing = $derived(pulled.length > 0 && revealed.size < pulled.length);
-	const ready = $derived(selected.size === TEAM_SIZE);
-	const corners = $derived(
-		Array.from({ length: TEAM_SIZE }, (_, i) => pulled.find((c) => c.id === [...selected][i]))
-	);
+<main class="menu">
+	<div class="card-row" aria-hidden="true">
+		<div class="card-track">
+			{#each strip as image, index (index)}
+				<!-- Decorative and well behind the mascot, so it loads at low priority
+				     rather than competing with the logo. -->
+				<img src={image} alt="" width="750" height="1058" decoding="async" fetchpriority="low" />
+			{/each}
+		</div>
+	</div>
 
-	// Cards turn themselves over one after another. Waiting for someone to
-	// discover that a card is clickable is a worse first thirty seconds than
-	// just dealing them out; clicking now only skips ahead.
-	let timer: ReturnType<typeof setTimeout> | null = null;
+	<section class="menu-content">
+		<img class="logo" src="/logo.png" alt="Gamblingmaxxer" />
+		<a href={resolve('/play')} class="menu-button">let's go gambling</a>
+		<p>did you know that 99.9% of gamblers quit before they hit it big?</p>
+	</section>
 
-	function stopDealing() {
-		if (timer) clearTimeout(timer);
-		timer = null;
+	<img class="grimble" src="/grimble.png" alt="grimble (Gamblingmaxxer mascot)s" />
+</main>
+
+<style>
+	.menu {
+		isolation: isolate;
+		position: relative;
+		display: grid;
+		min-height: 100vh;
+		place-items: center;
+		overflow: hidden;
+		background-color: #292930;
+		background-image:
+			linear-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px),
+			linear-gradient(90deg, rgb(255 255 255 / 0.08) 1px, transparent 1px),
+			radial-gradient(circle at 70% 48%, rgb(76 78 91 / 0.55), transparent 35rem);
+		background-size:
+			7.2rem 7.2rem,
+			7.2rem 7.2rem,
+			auto;
 	}
 
-	function dealOutFrom(i: number) {
-		if (i >= pulled.length) return stopDealing();
-		revealed.add(pulled[i].id);
-		timer = setTimeout(() => dealOutFrom(i + 1), 230);
+	.menu-content {
+		z-index: 2;
+		display: flex;
+		width: min(45rem, 88vw);
+		flex-direction: column;
+		align-items: flex-start;
+		gap: clamp(1.7rem, 4vw, 3rem);
+		transform: translateX(-11vw);
 	}
 
-	function turnAllOver() {
-		stopDealing();
-		for (const card of pulled) revealed.add(card.id);
+	.logo {
+		width: min(100%, 44rem);
+		filter: drop-shadow(0 0.8rem 0 #050505);
 	}
 
-	$effect(() => stopDealing);
+	.menu-button {
+		border: 0.45rem solid #050505;
+		border-radius: 1.75rem;
+		padding: clamp(1.2rem, 3vw, 2rem) clamp(2.2rem, 6vw, 4.3rem);
+		background: #9fdcff;
+		box-shadow:
+			0 0.65rem 0 #050505,
+			0 1.25rem 1.3rem rgb(0 0 0 / 0.35);
+		color: #050505;
+		font-family: Helvetica, Arial, sans-serif;
+		font-size: clamp(2rem, 5vw, 4.5rem);
+		font-weight: 900;
+		letter-spacing: -0.06em;
+		line-height: 1;
+		text-decoration: none;
+		transition:
+			transform 160ms ease,
+			box-shadow 160ms ease,
+			background 160ms ease;
+	}
 
-	async function pull() {
-		if (isPulling) return;
-		stopDealing();
-		isPulling = true;
-		error = null;
-		revealed.clear();
-		selected.clear();
-		pulled = [];
+	.menu-button:hover {
+		transform: translateY(-0.2rem) rotate(-1deg) scale(1.03);
+		background: #c3ebff;
+		box-shadow:
+			0 0.85rem 0 #050505,
+			0 1.5rem 1.5rem rgb(0 0 0 / 0.4);
+	}
 
-		try {
-			const data = await pullItems({ odds: odds ?? undefined });
+	.menu-button:active {
+		transform: translateY(0.45rem);
+		box-shadow: 0 0.2rem 0 #050505;
+	}
 
-			pulled = data.items;
-			odds = data.odds.current;
-			baseOdds ??= data.odds.initial;
+	.menu-button:focus-visible {
+		outline: 0.25rem solid white;
+		outline-offset: 0.4rem;
+	}
 
-			timer = setTimeout(() => dealOutFrom(0), 500);
-		} catch (err) {
-			console.error(err);
-			error = 'the machine returned nothing.';
-		} finally {
-			isPulling = false;
+	.menu-content p {
+		margin: -1rem 0 0 1.8rem;
+		color: #f5f5f6;
+		font-family: Helvetica, Arial, sans-serif;
+		font-size: clamp(0.82rem, 1.45vw, 1.25rem);
+		font-style: italic;
+	}
+
+	.grimble {
+		z-index: 1;
+		position: absolute;
+		right: max(-3rem, 4vw);
+		bottom: 0rem;
+		width: min(47vw, 43rem);
+		filter: drop-shadow(0 0.7rem 0 #050505) drop-shadow(0 1.5rem 1.5rem rgb(0 0 0 / 0.3));
+	}
+
+	.card-row {
+		z-index: 0;
+		position: absolute;
+		right: -6rem;
+		bottom: -6rem;
+		left: -6rem;
+		overflow: hidden;
+		opacity: 0.28;
+		transform: rotate(-1.5deg);
+	}
+
+	/*
+	 * Drifts left forever. The travel is one copy of the strip — half the track,
+	 * less half a gap, since the two copies have a gap between them as well as
+	 * inside them — which puts copy two exactly where copy one started.
+	 */
+	.card-track {
+		display: flex;
+		width: max-content;
+		gap: 1rem;
+		animation: drift 48s linear infinite;
+	}
+
+	@keyframes drift {
+		to {
+			transform: translateX(calc(-50% - 0.5rem));
 		}
 	}
 
-	function toggleCorner(id: string) {
-		if (selected.has(id)) selected.delete(id);
-		else if (selected.size < TEAM_SIZE) selected.add(id);
+	.card-row img {
+		width: 10rem;
+		height: auto;
+		box-shadow: 0 0.6rem 1rem rgb(0 0 0 / 0.45);
 	}
 
-	let zoomed = $state<Item | null>(null);
-	let returnFocusTo: HTMLElement | null = null;
-
-	function zoom(card: Item) {
-		returnFocusTo = document.activeElement as HTMLElement | null;
-		zoomed = card;
+	@media (max-width: 720px) {
+		.menu-content {
+			width: 90vw;
+			align-items: center;
+			transform: none;
+		}
+		.menu-content p {
+			margin-left: 0;
+			text-align: center;
+		}
+		.grimble {
+			right: -8rem;
+			width: 79vw;
+			opacity: 0.72;
+		}
+		.card-row {
+			left: -15rem;
+			opacity: 0.18;
+		}
 	}
-
-	function closeZoom() {
-		zoomed = null;
-		returnFocusTo?.focus();
-		returnFocusTo = null;
-	}
-</script>
-
-<!-- The wall photo carries its own lamps and vignette, so the only layer over
-     it is a little extra falloff at the edges. -->
-<div class="relative min-h-dvh">
-	<div class="pointer-events-none fixed inset-0 z-0 room-ground" aria-hidden="true"></div>
-	<div class="pointer-events-none fixed inset-0 z-0 vignette" aria-hidden="true"></div>
-
-	<div class="relative z-10 flex min-h-dvh flex-col text-chalk">
-		<header class="mx-auto flex w-full max-w-6xl items-center gap-2.5 px-4 py-5 sm:px-6">
-			<Sparkle class="w-6 shrink-0 text-lamp drop-shadow-[0_0.2rem_0_var(--color-ink)]" />
-			<span class="text-xl font-black tracking-[-0.055em]">gamblingmaxxer6000</span>
-			<span class="ml-auto micro">set 297</span>
-		</header>
-
-		<main class="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 sm:px-6">
-			{#if mode === 'PULL'}
-				<section class="flex flex-col items-center gap-8 text-center">
-					<div class="space-y-3 pt-4">
-						<h2 class="text-4xl hard-shadow sm:text-6xl">ten come out. three go in.</h2>
-						<p class="text-base text-chalk/85 italic sm:text-lg">
-							you keep one of your three. we print it and hand it to you.
-						</p>
-					</div>
-
-					<button
-						onclick={pull}
-						disabled={isPulling}
-						class="slab bg-lamp px-10 py-5 text-3xl text-ink hover:bg-lamp-bright
-						       disabled:cursor-wait disabled:opacity-60 sm:px-14 sm:py-6 sm:text-5xl"
-					>
-						{isPulling ? 'pulling' : 'pull ×10'}
-					</button>
-
-					{#if error}
-						<p class="text-sm font-bold text-lamp" role="alert">{error} pull again.</p>
-					{/if}
-
-					{#if pulled.length > 0}
-						<!-- The night's sheet, taped to the wall. -->
-						<div class="relative w-full" transition:fly={{ y: 16, duration: 350 }}>
-							<span class="absolute -top-2 left-8 z-20 h-6 w-16 -rotate-6 tape"></span>
-							<span class="absolute -top-2 right-8 z-20 h-6 w-16 rotate-3 tape"></span>
-
-							<div class="panel px-3 py-5 sm:px-5">
-								<div class="mb-4 flex items-center justify-between gap-3">
-									<span class="micro">{revealed.size} of {pulled.length} turned over</span>
-									{#if dealing}
-										<button
-											onclick={turnAllOver}
-											class="micro text-chalk/70! underline underline-offset-4 hover:text-lamp!"
-										>
-											show me all of them
-										</button>
-									{/if}
-								</div>
-
-								<ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-5">
-									{#each pulled as card, i (card.id)}
-										<li in:fly={{ y: 24, duration: 380, delay: i * 40 }}>
-											<!-- While they're still landing a tap skips ahead; once
-											     they're all up, a tap opens the card. -->
-											<Card
-												{card}
-												revealed={revealed.has(card.id)}
-												onactivate={() => (dealing ? turnAllOver() : zoom(card))}
-												action={dealing ? 'turn them all over' : 'see the whole card'}
-											/>
-										</li>
-									{/each}
-								</ul>
-							</div>
-						</div>
-
-						<button
-							onclick={() => (mode = 'DECK')}
-							class="slab bg-chalk px-9 py-4 text-2xl text-ink hover:bg-white sm:text-3xl"
-						>
-							pick three →
-						</button>
-					{/if}
-
-					{#if odds}
-						<div class="w-full max-w-3xl text-left">
-							<OddsBoard current={odds} base={baseOdds} />
-						</div>
-					{/if}
-				</section>
-			{:else if mode === 'DECK'}
-				<section class="flex flex-col gap-9 pt-4">
-					<div class="text-center">
-						<h2 class="text-4xl hard-shadow sm:text-5xl">pick three</h2>
-						<p class="mt-3 text-chalk/85 italic">
-							the other seven stay on the floor. one of these three is yours to keep.
-						</p>
-					</div>
-
-					<div class="mx-auto grid w-full max-w-2xl grid-cols-3 gap-4 sm:gap-6">
-						{#each corners as card, i (i)}
-							<div class="space-y-2">
-								<span class="block text-center micro">corner {i + 1}</span>
-
-								{#if card}
-									<Card
-										{card}
-										selected
-										corner={i + 1}
-										onactivate={() => toggleCorner(card.id)}
-										action="take out of the corner"
-										onzoom={() => zoom(card)}
-									/>
-								{:else}
-									<div
-										class="flex aspect-card items-center justify-center rounded-[6%]
-										       border-4 border-dashed border-ink/70 bg-black/25"
-									>
-										<Sparkle class="w-1/4 text-white/15" />
-									</div>
-								{/if}
-							</div>
-						{/each}
-					</div>
-
-					<div>
-						<span class="mb-3 block micro">on the floor</span>
-						<ul class="grid grid-cols-3 gap-3 sm:grid-cols-5 sm:gap-5">
-							{#each pulled as card (card.id)}
-								<li>
-									<!-- Picking is the job on this screen, so a tap does that and
-									     the corner button is what opens the card. -->
-									<Card
-										{card}
-										selected={selected.has(card.id)}
-										muted={ready && !selected.has(card.id)}
-										onactivate={() => toggleCorner(card.id)}
-										action={selected.has(card.id) ? 'take out of the corner' : 'put in a corner'}
-										onzoom={() => zoom(card)}
-									/>
-								</li>
-							{/each}
-						</ul>
-					</div>
-
-					<div class="flex flex-wrap items-center justify-center gap-5">
-						<button
-							onclick={() => (mode = 'PULL')}
-							class="slab bg-wall-lit px-7 py-3.5 text-xl text-ink hover:bg-chalk"
-						>
-							← pull again
-						</button>
-
-						<button
-							onclick={() => (mode = 'RING')}
-							disabled={!ready}
-							class="slab px-9 py-3.5 text-2xl text-ink
-							       {ready ? 'bg-lamp hover:bg-lamp-bright' : 'cursor-not-allowed bg-wall-lit/40 text-chalk/40'}"
-						>
-							{ready ? 'send them in' : `${selected.size} of ${TEAM_SIZE} picked`}
-						</button>
-					</div>
-				</section>
-			{:else}
-				<!-- The bout resolver exists; the room it happens in doesn't yet. -->
-				<section class="mx-auto flex max-w-xl flex-col items-center gap-7 py-16 text-center">
-					<Sparkle class="w-12 text-lamp drop-shadow-[0_0.25rem_0_var(--color-ink)]" />
-
-					<div class="space-y-3">
-						<h2 class="text-4xl hard-shadow">the ring isn't built yet</h2>
-						<p class="text-lg text-chalk/85 italic">
-							the bout resolver works — it settles a fight round by round, element matchups and all.
-							the room it happens in doesn't.
-						</p>
-					</div>
-
-					<p class="panel px-5 py-4 text-sm text-chalk/85">
-						when it is: your three fight three of the seven you left behind. then you pick one of
-						your three to keep, and we print it and hand it to you.
-					</p>
-
-					<button
-						onclick={() => (mode = 'DECK')}
-						class="slab bg-chalk px-8 py-3.5 text-xl text-ink hover:bg-white"
-					>
-						← back to the floor
-					</button>
-				</section>
-			{/if}
-		</main>
-
-		<footer class="mx-auto w-full max-w-6xl px-4 pb-8 sm:px-6">
-			<p class="text-center micro">gamblingmaxxer6000 · set 297 · art by kat wang</p>
-		</footer>
-	</div>
-</div>
-
-{#if zoomed}
-	<CardZoom card={zoomed} onclose={closeZoom} />
-{/if}
+</style>
