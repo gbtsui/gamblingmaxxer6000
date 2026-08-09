@@ -6,6 +6,7 @@ export const RARITY_WEIGHTS = {
 	common: 70,
 	uncommon: 20,
 	rare: 8,
+	epic: 4,
 	legendary: 2
 } as const satisfies Record<string, number>;
 
@@ -18,15 +19,15 @@ export const RARITY_WEIGHTS = {
  * Equal weights give a flat split; set them unevenly to bias the base odds.
  */
 export const ELEMENT_WEIGHTS = {
-	ice: 1,
-	fire: 1,
-	air: 1,
 	water: 1,
+	fire: 1,
+	ice: 1,
+	air: 1,
 	metal: 1,
-	grimble: 1,
-	tung_descendant: 1,
+	void: 1,
 	socratic: 1,
-	voidtype: 1
+	tung_descendant: 1,
+	grimble: 1
 } as const satisfies Record<string, number>;
 
 export type Rarity = keyof typeof RARITY_WEIGHTS;
@@ -38,10 +39,12 @@ export const ELEMENTS = Object.keys(ELEMENT_WEIGHTS) as readonly Element[];
 /** One row of the items CSV, as returned by `/api/items/random`. */
 export type Item = {
 	id: string;
-	displayName: string;
+	display_name: string;
 	image: string;
 	rarity: Rarity;
 	element: Element;
+	hp: number;
+	damage: number;
 };
 
 /** A probability per category. Values always sum to 1. */
