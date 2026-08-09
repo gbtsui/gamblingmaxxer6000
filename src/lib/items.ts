@@ -5,6 +5,7 @@ export type PullRequest = {
 	weights?: Partial<PullWeights>;
 	/** Carry `odds.current` from a previous pull to keep the streak going. */
 	odds?: PullOdds;
+	exclude?: string[];
 };
 
 /**

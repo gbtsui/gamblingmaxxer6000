@@ -39,6 +39,35 @@
 	// just dealing them out; clicking now only skips ahead.
 	let timer: ReturnType<typeof setTimeout> | null = null;
 
+	let excludedCards = $state<string[]>([]);
+
+	if (typeof window !== 'undefined') {
+		(window as any).excludeCard = (cardId: string) => {
+			if (!excludedCards.includes(cardId)) {
+				excludedCards = [...excludedCards, cardId];
+				console.log(`Excluded: ${cardId}`);
+				console.log('Current exclusions:', excludedCards);
+			}
+		};
+
+		(window as any).removeExclusion = (cardId: string) => {
+			excludedCards = excludedCards.filter(id => id !== cardId);
+			console.log(`Removed exclusion: ${cardId}`);
+			console.log('Current exclusions:', excludedCards);
+		};
+
+		(window as any).clearExclusions = () => {
+			excludedCards = [];
+			console.log('All exclusions cleared');
+		};
+
+		(window as any).showExclusions = () => {
+			console.log('Excluded cards:', excludedCards);
+			return excludedCards;
+		};
+	}
+
+
 	function stopDealing() {
 		if (timer) clearTimeout(timer);
 		timer = null;

@@ -11,6 +11,14 @@ import {
 	type Rarity
 } from '$lib/types';
 
+export type PullOptions = {
+	count: number;
+	weights?: Partial<PullWeights>;
+	odds?: PullOdds;
+	exclude?: string[];  // Add this
+	rng?: () => number;
+};
+
 // Derived from the registries in $lib/types, so editing a registry is the only
 // change needed to add, remove or re-weight a category.
 export const BASE_RARITY_ODDS: Odds<Rarity> = normalize(RARITY_WEIGHTS);
@@ -70,13 +78,6 @@ export function sample<K extends string>(odds: Odds<K>, rng: () => number = Math
 	return keys[keys.length - 1];
 }
 
-export type PullOptions = {
-	count: number;
-	weights?: Partial<PullWeights>;
-	odds?: PullOdds;
-	rng?: () => number;
-};
-
 export type PullResult = {
 	items: Item[];
 	initial: PullOdds;
@@ -90,7 +91,7 @@ export type PullResult = {
  * what it landed on so the next draw leans elsewhere.
  */
 export function pull(pool: readonly Item[], options: PullOptions): PullResult {
-	const { count, rng = Math.random } = options;
+	const { count, exclude, rng = Math.random } = options;
 	// Key by key, not by spread: a `{ rarity: undefined }` from an omitted query
 	// param would otherwise clobber the default rather than fall back to it.
 	const weights: PullWeights = {
@@ -102,7 +103,12 @@ export function pull(pool: readonly Item[], options: PullOptions): PullResult {
 		: baseOdds();
 
 	let odds: PullOdds = { rarity: { ...initial.rarity }, element: { ...initial.element } };
-	const remaining = [...pool];
+
+	// Filter out excluded items from the pool
+	const remaining = [...pool].filter(item =>
+		!exclude || exclude.length === 0 || !exclude.includes(item.id) // Assuming items have an 'id' field
+	);
+
 	const items: Item[] = [];
 
 	for (let i = 0; i < count && remaining.length > 0; i++) {

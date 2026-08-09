@@ -25,9 +25,11 @@ export const GET: RequestHandler = ({ url }) => {
 		rarity: readWeight(url.searchParams.get('rarityWeight'), 'rarityWeight'),
 		element: readWeight(url.searchParams.get('elementWeight'), 'elementWeight')
 	};
+	const exclude = readExclude(url.searchParams.get('exclude'));
 
-	return respond(pull(items, { count, weights }));
+	return respond(pull(items, { count, weights, exclude }));
 };
+
 
 /**
  * POST /api/items/random
@@ -40,11 +42,12 @@ export const POST: RequestHandler = async ({ request }) => {
 	const body: unknown = await request.json().catch(() => error(400, 'body must be valid JSON'));
 	if (typeof body !== 'object' || body === null) error(400, 'body must be a JSON object');
 
-	const { count: rawCount, weights: rawWeights, odds: rawOdds } = body as Record<string, unknown>;
+	const { count: rawCount, weights: rawWeights, odds: rawOdds, exclude: rawExclude } = body as Record<string, unknown>;
 
 	const count = readCount(rawCount === undefined ? null : String(rawCount));
 	const weights: Partial<PullWeights> = {};
 	const odds = rawOdds === undefined ? undefined : readOdds(rawOdds);
+	const exclude = readExclude(rawExclude);
 
 	if (typeof rawWeights === 'object' && rawWeights !== null) {
 		const { rarity, element } = rawWeights as Record<string, unknown>;
@@ -52,7 +55,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		weights.element = readWeight(element === undefined ? null : String(element), 'weights.element');
 	}
 
-	return respond(pull(items, { count, weights, odds }));
+	return respond(pull(items, { count, weights, odds, exclude }));
 };
 
 function respond(result: ReturnType<typeof pull>) {
@@ -131,6 +134,25 @@ function readCategoryOdds<K extends string>(
 
 	// Accept odds that don't quite sum to 1 — clients round when they serialise.
 	return normalize(result);
+}
+function readExclude(raw: unknown): string[] | undefined {
+	if (raw === undefined || raw === null) return undefined;
+
+	// Handle comma-separated string from GET requests
+	if (typeof raw === 'string') {
+		const items = raw.split(',').map(s => s.trim()).filter(Boolean);
+		return items.length > 0 ? items : undefined;
+	}
+
+	// Handle array from POST requests
+	if (Array.isArray(raw)) {
+		const items = raw
+			.map(item => String(item).trim())
+			.filter(Boolean);
+		return items.length > 0 ? items : undefined;
+	}
+
+	error(400, 'exclude must be a comma-separated string or an array of item identifiers');
 }
 
 /*

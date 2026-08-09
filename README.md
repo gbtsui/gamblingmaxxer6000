@@ -1,6 +1,6 @@
 # gamblingmaxxer6000
 
-A Polaris project by Gabriel Tsui, Jenin Henin and Kat Wang
+A Polaris project by Gabe, Jenin and Kat
 ![screenshot.png](static/screenshot.png)
 ## premise
 
