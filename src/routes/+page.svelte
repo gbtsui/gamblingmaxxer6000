@@ -1,375 +1,293 @@
 <script lang="ts">
-    import {fly, scale} from "svelte/transition"
-    import { flip } from "svelte/animate";
+	import { fly } from 'svelte/transition';
+	import { SvelteSet } from 'svelte/reactivity';
+	import { pullItems } from '$lib/items';
+	import { TEAM_SIZE, type Item, type PullOdds } from '$lib/types';
+	import Card from '$lib/components/Card.svelte';
+	import CardZoom from '$lib/components/CardZoom.svelte';
+	import OddsBoard from '$lib/components/OddsBoard.svelte';
+	import Sparkle from '$lib/components/Sparkle.svelte';
 
-    type Card = {
-        id: string;
-        display_name: string;
-        image: string;
-        rarity: string;
-        element: string;
-        hp: number;
-        damage: number;
-    }
+	let mode = $state<'PULL' | 'DECK' | 'RING'>('PULL');
 
-    let mode = $state<"PULL" | "DECK" | "FIGHT" | "RESULT">("PULL")
+	let isPulling = $state(false);
+	let error = $state<string | null>(null);
+	let pulled = $state<Item[]>([]);
+	const revealed = new SvelteSet<string>();
+	const selected = new SvelteSet<string>();
 
-    let isPulling = $state(false);
-    let pulledCards = $state<Card[]>([]);
-    //let showCards = $state(false);
-    let flippedCards = $state<Set<string>>(new Set());
-    let currentOdds = $state<any>(null);
+	/** Where the odds stand now. Fed back in so the drift carries between pulls. */
+	let odds = $state<PullOdds | null>(null);
+	/** The house baseline, captured from the first pull, for the drift readout. */
+	let baseOdds = $state<PullOdds | null>(null);
 
-    let selectedCards = $state<Set<string>>(new Set());
-    let deckConfirmed = $state(false);
+	const dealing = $derived(pulled.length > 0 && revealed.size < pulled.length);
+	const ready = $derived(selected.size === TEAM_SIZE);
+	const corners = $derived(
+		Array.from({ length: TEAM_SIZE }, (_, i) => pulled.find((c) => c.id === [...selected][i]))
+	);
 
-    const rarityColors: Record<string, string> = {
-        common: 'from-stone-400 to-stone-500 border-stone-300',
-        uncommon: 'from-green-500 to-emerald-600 border-green-300',
-        rare: 'from-blue-500 to-indigo-600 border-blue-300',
-        epic: 'from-purple-500 to-violet-600 border-purple-300',
-        legendary: 'from-amber-400 to-yellow-500 border-yellow-200'
-    };
+	// Cards turn themselves over one after another. Waiting for someone to
+	// discover that a card is clickable is a worse first thirty seconds than
+	// just dealing them out; clicking now only skips ahead.
+	let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const rarityGlow: Record<string, string> = {
-        common: 'shadow-stone-400/20',
-        uncommon: 'shadow-green-400/30',
-        rare: 'shadow-blue-400/40',
-        epic: 'shadow-purple-400/50',
-        legendary: 'shadow-yellow-400/60'
-    };
+	function stopDealing() {
+		if (timer) clearTimeout(timer);
+		timer = null;
+	}
 
-    async function pullCards() {
-        if (isPulling) return;
-        isPulling = true;
-        flippedCards = new Set(); // Reset all flips
-        pulledCards = [];
+	function dealOutFrom(i: number) {
+		if (i >= pulled.length) return stopDealing();
+		revealed.add(pulled[i].id);
+		timer = setTimeout(() => dealOutFrom(i + 1), 230);
+	}
 
-        try {
-            const res = await fetch('/api/items/random', {
-                method: "POST",
-                body: JSON.stringify({
+	function turnAllOver() {
+		stopDealing();
+		for (const card of pulled) revealed.add(card.id);
+	}
 
-                })
-            });
-            const data = await res.json();
+	$effect(() => stopDealing);
 
-            pulledCards = data.items;
-            currentOdds = data.odds;
+	async function pull() {
+		if (isPulling) return;
+		stopDealing();
+		isPulling = true;
+		error = null;
+		revealed.clear();
+		selected.clear();
+		pulled = [];
 
-            // No more delay needed - cards appear face-down immediately
-        } catch (err) {
-            console.error('Pull failed:', err);
-        } finally {
-            isPulling = false;
-        }
-    }
+		try {
+			const data = await pullItems({ odds: odds ?? undefined });
 
-    function toggleFlip(cardId: string) {
-        const newFlipped = new Set(flippedCards);
-        if (newFlipped.has(cardId)) {
-            newFlipped.delete(cardId);
-        } else {
-            newFlipped.add(cardId);
-        }
-        flippedCards = newFlipped;
-    }
+			pulled = data.items;
+			odds = data.odds.current;
+			baseOdds ??= data.odds.initial;
 
-    function toggleCardSelect(cardId: string) {
-        if (deckConfirmed) return;
+			timer = setTimeout(() => dealOutFrom(0), 500);
+		} catch (err) {
+			console.error(err);
+			error = 'the machine returned nothing.';
+		} finally {
+			isPulling = false;
+		}
+	}
 
-        const newSelected = new Set(selectedCards);
-        if (newSelected.has(cardId)) {
-            newSelected.delete(cardId);
-        } else if (newSelected.size < 3) {
-            newSelected.add(cardId);
-        }
-        selectedCards = newSelected;
-    }
+	function toggleCorner(id: string) {
+		if (selected.has(id)) selected.delete(id);
+		else if (selected.size < TEAM_SIZE) selected.add(id);
+	}
 
-    function confirmDeck() {
-        if (selectedCards.size !== 3) return;
-        deckConfirmed = true;
-        mode = 'FIGHT';
-    }
+	let zoomed = $state<Item | null>(null);
+	let returnFocusTo: HTMLElement | null = null;
 
-    // Element icons/emojis
-    const elementIcons: Record<string, string> = {
-        water: '💧',
-        fire: '🔥',
-        ice: '❄️',
-        air: '🌪️',
-        metal: '⚙️',
-        void: '🌑',
-        socratic: '📜',
-        tung_descendant: '⚡',
-        grimble: '👁️'
-    };
+	function zoom(card: Item) {
+		returnFocusTo = document.activeElement as HTMLElement | null;
+		zoomed = card;
+	}
 
-    async function sendFightRequest() {
-
-    }
+	function closeZoom() {
+		zoomed = null;
+		returnFocusTo?.focus();
+		returnFocusTo = null;
+	}
 </script>
 
-<style>
-    .preserve-3d {
-        transform-style: preserve-3d;
-    }
+<!-- The wall photo carries its own lamps and vignette, so the only layer over
+     it is a little extra falloff at the edges. -->
+<div class="relative min-h-dvh">
+	<div class="pointer-events-none fixed inset-0 z-0 room-ground" aria-hidden="true"></div>
+	<div class="pointer-events-none fixed inset-0 z-0 vignette" aria-hidden="true"></div>
 
-    .backface-hidden {
-        backface-visibility: hidden;
-    }
+	<div class="relative z-10 flex min-h-dvh flex-col text-chalk">
+		<header class="mx-auto flex w-full max-w-6xl items-center gap-2.5 px-4 py-5 sm:px-6">
+			<Sparkle class="w-6 shrink-0 text-lamp drop-shadow-[0_0.2rem_0_var(--color-ink)]" />
+			<span class="text-xl font-black tracking-[-0.055em]">gamblingmaxxer6000</span>
+			<span class="ml-auto micro">set 297</span>
+		</header>
 
-    .rotate-y-180 {
-        transform: rotateY(180deg);
-    }
+		<main class="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 sm:px-6">
+			{#if mode === 'PULL'}
+				<section class="flex flex-col items-center gap-8 text-center">
+					<div class="space-y-3 pt-4">
+						<h2 class="text-4xl hard-shadow sm:text-6xl">ten come out. three go in.</h2>
+						<p class="text-base text-chalk/85 italic sm:text-lg">
+							you keep one of your three. we print it and hand it to you.
+						</p>
+					</div>
 
-    .flipped .rotate-y-180 {
-        transform: rotateY(0deg);
-    }
+					<button
+						onclick={pull}
+						disabled={isPulling}
+						class="slab bg-lamp px-10 py-5 text-3xl text-ink hover:bg-lamp-bright
+						       disabled:cursor-wait disabled:opacity-60 sm:px-14 sm:py-6 sm:text-5xl"
+					>
+						{isPulling ? 'pulling' : 'pull ×10'}
+					</button>
 
-    .flipped .backface-hidden:first-child {
-        transform: rotateY(180deg);
-    }
+					{#if error}
+						<p class="text-sm font-bold text-lamp" role="alert">{error} pull again.</p>
+					{/if}
 
-    .preserve-3d > div {
-        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-</style>
+					{#if pulled.length > 0}
+						<!-- The night's sheet, taped to the wall. -->
+						<div class="relative w-full" transition:fly={{ y: 16, duration: 350 }}>
+							<span class="absolute -top-2 left-8 z-20 h-6 w-16 -rotate-6 tape"></span>
+							<span class="absolute -top-2 right-8 z-20 h-6 w-16 rotate-3 tape"></span>
 
-<div class="h-[100vh] w-[100vw] flex flex-col bg-gradient-to-b from-stone-800 to-stone-900 overflow-hidden text-stone-300">
-    <div class="w-[100vw] h-[5rem] text-xl bg-stone-800 text-center justify-center items-center flex ">GAMBLINGMAXXER6000</div>
+							<div class="panel px-3 py-5 sm:px-5">
+								<div class="mb-4 flex items-center justify-between gap-3">
+									<span class="micro">{revealed.size} of {pulled.length} turned over</span>
+									{#if dealing}
+										<button
+											onclick={turnAllOver}
+											class="micro text-chalk/70! underline underline-offset-4 hover:text-lamp!"
+										>
+											show me all of them
+										</button>
+									{/if}
+								</div>
 
-        <!--asdfhkahsfdlkjhsalkfha
+								<ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-5">
+									{#each pulled as card, i (card.id)}
+										<li in:fly={{ y: 24, duration: 380, delay: i * 40 }}>
+											<!-- While they're still landing a tap skips ahead; once
+											     they're all up, a tap opens the card. -->
+											<Card
+												{card}
+												revealed={revealed.has(card.id)}
+												onactivate={() => (dealing ? turnAllOver() : zoom(card))}
+												action={dealing ? 'turn them all over' : 'see the whole card'}
+											/>
+										</li>
+									{/each}
+								</ul>
+							</div>
+						</div>
 
-        - pull screen with cool animation
-        - deck select screen
-        - fight animation screen
-        - result screen that caches the current odds and results
+						<button
+							onclick={() => (mode = 'DECK')}
+							class="slab bg-chalk px-9 py-4 text-2xl text-ink hover:bg-white sm:text-3xl"
+						>
+							pick three →
+						</button>
+					{/if}
 
+					{#if odds}
+						<div class="w-full max-w-3xl text-left">
+							<OddsBoard current={odds} base={baseOdds} />
+						</div>
+					{/if}
+				</section>
+			{:else if mode === 'DECK'}
+				<section class="flex flex-col gap-9 pt-4">
+					<div class="text-center">
+						<h2 class="text-4xl hard-shadow sm:text-5xl">pick three</h2>
+						<p class="mt-3 text-chalk/85 italic">
+							the other seven stay on the floor. one of these three is yours to keep.
+						</p>
+					</div>
 
-        -->
+					<div class="mx-auto grid w-full max-w-2xl grid-cols-3 gap-4 sm:gap-6">
+						{#each corners as card, i (i)}
+							<div class="space-y-2">
+								<span class="block text-center micro">corner {i + 1}</span>
 
-    <main class="flex-1 mt-[3rem]">
-        {#if (mode === "PULL")}
-            <div class="h-full flex flex-col items-center justify-start gap-8 transition-all">
-                <button onclick={pullCards} disabled={isPulling} class="relative group cursor-pointer">
-                    <span class="absolute inset-0 bg-gradient-to-r from-amber-400 to-yellow-500 rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity"></span>
-                    <span class="relative px-12 py-6 bg-gradient-to-r from-amber-500 to-yellow-400 rounded-2xl text-black font-black text-2xl transform transition-all hover:scale-105 active:scale-95">
-                        {#if isPulling}
-							<!--
-                            <span class="flex items-center gap-3">
-                                <span class="inline-block w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
-								PULLING...
-							</span>
-							-->
-                            pulling...
-                        {:else}
-                            gamblecore: pull x10
-                        {/if}
-                    </span>
-                </button>
-                <!--cardgrid-->
+								{#if card}
+									<Card
+										{card}
+										selected
+										corner={i + 1}
+										onactivate={() => toggleCorner(card.id)}
+										action="take out of the corner"
+										onzoom={() => zoom(card)}
+									/>
+								{:else}
+									<div
+										class="flex aspect-card items-center justify-center rounded-[6%]
+										       border-4 border-dashed border-ink/70 bg-black/25"
+									>
+										<Sparkle class="w-1/4 text-white/15" />
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
 
-                {#if pulledCards.length > 0}
-                    <div class="grid grid-cols-5 gap-4 px-8 max-w-6xl w-full">
-                        {#each pulledCards as card, i (i)}
-                            <div
-                                    class="relative aspect-[2/3] transform transition-all duration-500 cursor-pointer hover:scale-110 hover:z-10"
-                                    style="transition-delay: {i * 50}ms"
-                                    transition:fly={{duration: 500, delay: i * 50}}
-                                    onclick={() => toggleFlip(card.id)}
-                            >
-                                <!-- Card Container with Flip -->
-                                <div class="relative w-full h-full preserve-3d" class:flipped={flippedCards.has(card.id)}>
-                                    <!-- Back of Card -->
-                                    <div class="absolute inset-0 backface-hidden rounded-xl bg-gradient-to-br from-stone-600 to-stone-800 border-2 border-stone-500 shadow-2xl flex items-center justify-center">
-                                        <!--
-                                        <div class="text-4xl opacity-50">🂠</div>-->
+					<div>
+						<span class="mb-3 block micro">on the floor</span>
+						<ul class="grid grid-cols-3 gap-3 sm:grid-cols-5 sm:gap-5">
+							{#each pulled as card (card.id)}
+								<li>
+									<!-- Picking is the job on this screen, so a tap does that and
+									     the corner button is what opens the card. -->
+									<Card
+										{card}
+										selected={selected.has(card.id)}
+										muted={ready && !selected.has(card.id)}
+										onactivate={() => toggleCorner(card.id)}
+										action={selected.has(card.id) ? 'take out of the corner' : 'put in a corner'}
+										onzoom={() => zoom(card)}
+									/>
+								</li>
+							{/each}
+						</ul>
+					</div>
 
-                                        <div class="absolute bottom-2 text-[10px] text-stone-400">click to reveal</div>
-                                    </div>
+					<div class="flex flex-wrap items-center justify-center gap-5">
+						<button
+							onclick={() => (mode = 'PULL')}
+							class="slab bg-wall-lit px-7 py-3.5 text-xl text-ink hover:bg-chalk"
+						>
+							← pull again
+						</button>
 
-                                    <!-- Front of Card -->
-                                    <div class="absolute inset-0 backface-hidden rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} shadow-2xl {rarityGlow[card.rarity] || rarityGlow.common} flex flex-col rotate-y-180">
-                                        {#if card.image}
-                                            <img src={card.image} alt={card.display_name} class="w-full h-full object-cover" />
-                                        {:else}
-                                            <div class="text-3xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                        {/if}
-                                        <!--
-                                        <div class="absolute top-2 right-2 text-2xl">
-                                            {elementIcons[card.element] || '❓'}
-                                        </div>
+						<button
+							onclick={() => (mode = 'RING')}
+							disabled={!ready}
+							class="slab px-9 py-3.5 text-2xl text-ink
+							       {ready ? 'bg-lamp hover:bg-lamp-bright' : 'cursor-not-allowed bg-wall-lit/40 text-chalk/40'}"
+						>
+							{ready ? 'send them in' : `${selected.size} of ${TEAM_SIZE} picked`}
+						</button>
+					</div>
+				</section>
+			{:else}
+				<!-- The bout resolver exists; the room it happens in doesn't yet. -->
+				<section class="mx-auto flex max-w-xl flex-col items-center gap-7 py-16 text-center">
+					<Sparkle class="w-12 text-lamp drop-shadow-[0_0.25rem_0_var(--color-ink)]" />
 
-                                        <div class="flex-1 rounded-lg bg-black/20 mb-2 flex items-center justify-center overflow-hidden">
-                                            {#if card.image}
-                                                <img src={card.image} alt={card.display_name} class="w-full h-full object-cover" />
-                                            {:else}
-                                                <div class="text-3xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                            {/if}
-                                        </div>
+					<div class="space-y-3">
+						<h2 class="text-4xl hard-shadow">the ring isn't built yet</h2>
+						<p class="text-lg text-chalk/85 italic">
+							the bout resolver works — it settles a fight round by round, element matchups and all.
+							the room it happens in doesn't.
+						</p>
+					</div>
 
-                                        <div class="text-xs font-bold text-center text-white drop-shadow-lg truncate">
-                                            {card.display_name}
-                                        </div>
+					<p class="panel px-5 py-4 text-sm text-chalk/85">
+						when it is: your three fight three of the seven you left behind. then you pick one of
+						your three to keep, and we print it and hand it to you.
+					</p>
 
-                                        <div class="flex justify-between text-[10px] text-white/80 mt-1">
-                                            <span>❤️ {card.hp}</span>
-                                            <span>⚔️ {card.damage}</span>
-                                        </div>
+					<button
+						onclick={() => (mode = 'DECK')}
+						class="slab bg-chalk px-8 py-3.5 text-xl text-ink hover:bg-white"
+					>
+						← back to the floor
+					</button>
+				</section>
+			{/if}
+		</main>
 
-                                        <div class="absolute top-2 left-2 text-[10px] font-medium bg-black/30 rounded px-1.5 py-0.5 text-white/70">
-                                            {card.rarity}
-                                        </div>
-                                        -->
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
-
-                    <!-- Action Button -->
-                    <button
-                            onclick={() => mode = 'DECK'}
-                            class="px-8 py-3 bg-stone-700 hover:bg-stone-600 rounded-xl font-bold transition-colors"
-                    >
-                        Select Your Deck ->
-                    </button>
-                {/if}
-
-            </div>
-        {:else if mode === 'DECK'}
-            <div class="h-full flex flex-col items-center justify-center gap-8 p-8">
-                <!-- Selected Cards Showcase -->
-                <div class="flex gap-6 h-64 items-end">
-                    {#each Array(3) as _, slot (slot)}
-                        {#if [...selectedCards][slot]}
-                            {@const card = pulledCards.find(c => c.id === [...selectedCards][slot])}
-                            {#if card}
-                                <div class="aspect-[2/3] h-full rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 shadow-2xl {rarityGlow[card.rarity] || rarityGlow.common} flex flex-col p-3 transition-all duration-300 hover:scale-105 cursor-pointer"
-                                     onclick={() => toggleCardSelect(card.id)}
-                                >
-                                    <div class="absolute -top-2 -right-2 w-6 h-6 bg-amber-400 rounded-full flex items-center justify-center text-black font-black text-xs z-10">
-                                        {slot + 1}
-                                    </div>
-                                    <div class="absolute top-2 right-2 text-lg">
-                                        {elementIcons[card.element] || '❓'}
-                                    </div>
-                                    <div class="flex-1 rounded-lg bg-black/20 m-1 flex items-center justify-center overflow-hidden">
-                                        {#if card.image}
-                                            <img src={card.image} alt={card.display_name} class="w-full h-full object-cover rounded" />
-                                        {:else}
-                                            <div class="text-2xl opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                        {/if}
-                                    </div>
-                                    <div class="text-[10px] font-bold text-center text-white drop-shadow-lg leading-tight">
-                                        {card.display_name}
-                                    </div>
-                                    <div class="flex justify-center gap-3 text-[9px] text-white/70 mt-0.5">
-                                        <span>❤️ {card.hp}</span>
-                                        <span>⚔️ {card.damage}</span>
-                                    </div>
-                                    <div class="absolute top-2 left-2 text-[8px] font-black uppercase bg-black/30 rounded px-1 py-0.5 text-white/70">
-                                        {card.rarity}
-                                    </div>
-                                </div>
-                            {/if}
-                        {:else}
-                            <!-- Empty Slot -->
-                            <div class="aspect-[2/3] h-full rounded-xl border-2 border-dashed border-stone-600 bg-stone-800/50 flex items-center justify-center">
-                                <div class="text-4xl text-stone-600 opacity-30">+</div>
-                            </div>
-                        {/if}
-                    {/each}
-                </div>
-
-                <!-- Selection Counter -->
-                <div class="text-center">
-                    <p class="text-lg font-bold {selectedCards.size === 3 ? 'text-amber-400' : 'text-stone-400'}">
-                        {selectedCards.size} / 3 Selected
-                    </p>
-                    {#if selectedCards.size === 3}
-                        <p class="text-sm text-amber-400/70">Ready for battle!</p>
-                    {/if}
-                </div>
-
-                <!-- Card Selection Row -->
-                <div class="flex gap-3 justify-center flex-wrap max-w-5xl">
-                    {#each pulledCards as card (card)}
-                        <button
-                                onclick={() => toggleCardSelect(card.id)}
-                                disabled={selectedCards.size >= 3 && !selectedCards.has(card.id)}
-                                class="relative aspect-[2/3] h-44 rounded-xl bg-gradient-to-br {rarityColors[card.rarity] || rarityColors.common} border-2 transition-all
-						{selectedCards.has(card.id)
-							? 'ring-4 ring-amber-400 scale-105 shadow-2xl shadow-amber-400/50 -translate-y-2'
-							: selectedCards.size >= 3
-								? 'opacity-30 grayscale cursor-not-allowed'
-								: 'opacity-80 hover:opacity-100 hover:scale-105 hover:-translate-y-1'}"
-                        >
-                            {#if selectedCards.has(card.id)}
-                                <div class="absolute -top-2 -right-2 w-6 h-6 bg-amber-400 rounded-full flex items-center justify-center text-black font-black text-xs z-10">
-                                    ✓
-                                </div>
-                            {/if}
-
-                            <div class="absolute top-1.5 right-1.5 text-base">
-                                {elementIcons[card.element] || '❓'}
-                            </div>
-
-                            <div class="flex-1 rounded bg-black/20 m-1.5 flex items-center justify-center overflow-hidden" style="height: calc(100% - 3.5rem)">
-                                {#if card.image}
-                                    <img src={card.image} alt={card.display_name} class="w-full h-full object-cover rounded" />
-                                {:else}
-                                    <div class="text-lg opacity-40">{elementIcons[card.element] || '🃏'}</div>
-                                {/if}
-                            </div>
-
-                            <div class="text-[10px] font-bold text-white drop-shadow-lg absolute bottom-7 left-0 right-0 text-center px-1 leading-tight">
-                                {card.display_name}
-                            </div>
-
-                            <div class="absolute bottom-1.5 left-0 right-0 flex justify-center gap-2 text-[9px] text-white/70">
-                                <span>❤️ {card.hp}</span>
-                                <span>⚔️ {card.damage}</span>
-                            </div>
-
-                            <div class="absolute top-1.5 left-1.5 text-[8px] font-black uppercase bg-black/30 rounded px-1 py-0.5 text-white/70">
-                                {card.rarity}
-                            </div>
-                        </button>
-                    {/each}
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="flex gap-4 mt-2">
-                    <button
-                            onclick={() => mode = 'PULL'}
-                            class="px-6 py-3 bg-stone-700 hover:bg-stone-600 rounded-xl font-bold transition-colors"
-                    >
-                        ← Pull Again
-                    </button>
-                    <button
-                            onclick={confirmDeck}
-                            disabled={selectedCards.size !== 3}
-                            class="px-10 py-3 rounded-xl font-black text-lg transition-all
-					{selectedCards.size === 3
-						? 'bg-gradient-to-r from-red-500 to-orange-500 text-white hover:scale-105 shadow-lg shadow-red-500/30 cursor-pointer'
-						: 'bg-stone-700 text-stone-500 cursor-not-allowed'}"
-                    >
-                        ⚔️ FIGHT!
-                    </button>
-                </div>
-            </div>
-        {:else if (mode === "FIGHT")}
-            <div>
-
-            </div>
-        {:else if (mode === "RESULT")}
-            <div>
-
-            </div>
-        {/if}
-    </main>
+		<footer class="mx-auto w-full max-w-6xl px-4 pb-8 sm:px-6">
+			<p class="text-center micro">gamblingmaxxer6000 · set 297 · art by kat wang</p>
+		</footer>
+	</div>
 </div>
 
+{#if zoomed}
+	<CardZoom card={zoomed} onclose={closeZoom} />
+{/if}

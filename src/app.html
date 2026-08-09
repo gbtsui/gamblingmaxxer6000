@@ -4,9 +4,16 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
+		<meta name="theme-color" content="#292930" />
+		<meta
+			name="description"
+			content="a card ring in the back room. ten come out, three go in, you keep one — printed and handed to you."
+		/>
+
 		%sveltekit.head%
 	</head>
-	<body data-sveltekit-preload-data="hover">
+	<!-- Painted here too so there's no white flash before the CSS lands. -->
+	<body data-sveltekit-preload-data="hover" style="background: #292930">
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

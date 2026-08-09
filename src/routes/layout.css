@@ -2,6 +2,190 @@
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
 
-h1, h2, h3, p, a {
-    font-family: Helvetica, sans-serif;
+/*
+ * gamblingmaxxer6000 — a card ring in a back room.
+ *
+ * Everything here follows the menu screen: Helvetica at weight 900 with tight
+ * negative tracking, pale sky blue on cool blue-grey, and controls built as
+ * thick black-bordered slabs sitting on a hard black offset shadow. Nothing is
+ * subtle and nothing is thin.
+ *
+ * The card art is bright pastel and hand-drawn, so the room stays cool and dim
+ * and lets the cards be the only clean colour in the building.
+ */
+
+@theme {
+	/* Straight off the menu: #292930 ground, #9fdcff button, #050505 outlines. */
+	--color-night: #1b1b21;
+	--color-wall: #292930;
+	--color-wall-lit: #8b8d9b;
+	--color-chalk: #f5f5f6;
+
+	/* The lamps in the room and the primary action are the same pale blue. */
+	--color-lamp: #9fdcff;
+	--color-lamp-bright: #c3ebff;
+
+	/* Every border and every drop shadow. Not a grey — actual black. */
+	--color-ink: #050505;
+
+	/* Helvetica for everything, exactly like the printed cards and the menu. */
+	--font-body: Helvetica, 'Helvetica Neue', Arial, sans-serif;
+
+	/* The real card art is 750x1058. aspect-[2/3] cropped ~6% off both sides. */
+	--aspect-card: 750 / 1058;
+}
+
+@layer base {
+	html {
+		background: var(--color-wall);
+		color-scheme: dark;
+	}
+
+	body {
+		background: var(--color-wall);
+		color: var(--color-chalk);
+		font-family: var(--font-body);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	/* The menu sets its headline at 900 with -0.06em. Everything follows. */
+	h1,
+	h2,
+	h3 {
+		font-weight: 900;
+		letter-spacing: -0.055em;
+		line-height: 0.95;
+		text-wrap: balance;
+	}
+
+	:focus-visible {
+		outline: 0.2rem solid var(--color-chalk);
+		outline-offset: 0.3rem;
+	}
+
+	.tabular {
+		font-variant-numeric: tabular-nums;
+	}
+}
+
+/* Small bold lowercase caption. No uppercase — neither the cards nor the menu
+   use any. */
+@utility micro {
+	font-size: 0.75rem;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	line-height: 1.2;
+	color: var(--color-wall-lit);
+}
+
+/*
+ * The menu's button, as a reusable slab: thick black outline, hard black
+ * offset underneath it, and a soft shadow under that. Hover lifts and cocks it
+ * slightly; pressing drives it down into its own shadow.
+ */
+@utility slab {
+	border: 0.3rem solid var(--color-ink);
+	border-radius: 1.1rem;
+	box-shadow:
+		0 0.45rem 0 var(--color-ink),
+		0 0.9rem 1.1rem rgb(0 0 0 / 0.35);
+	font-weight: 900;
+	letter-spacing: -0.05em;
+	line-height: 1;
+	transition:
+		transform 160ms ease,
+		box-shadow 160ms ease,
+		background 160ms ease;
+
+	&:hover:not(:disabled) {
+		transform: translateY(-0.15rem) rotate(-1deg) scale(1.02);
+		box-shadow:
+			0 0.6rem 0 var(--color-ink),
+			0 1.1rem 1.3rem rgb(0 0 0 / 0.4);
+	}
+
+	&:active:not(:disabled) {
+		transform: translateY(0.35rem);
+		box-shadow: 0 0.15rem 0 var(--color-ink);
+	}
+
+	&:disabled {
+		transform: none;
+	}
+}
+
+/* The hard black offset the menu puts under its logo, for type. */
+@utility hard-shadow {
+	text-shadow: 0 0.32rem 0 var(--color-ink);
+}
+
+/* A panel built the same way, but static — no lift, no press. */
+@utility panel {
+	border: 0.25rem solid var(--color-ink);
+	border-radius: 0.9rem;
+	background: rgb(20 20 25 / 0.62);
+	box-shadow:
+		0 0.35rem 0 var(--color-ink),
+		0 0.8rem 1.2rem rgb(0 0 0 / 0.35);
+}
+
+/*
+ * The wall. Cool blue-grey concrete with two lamps at the top; the photo
+ * carries its own lighting and vignette, so there is no separate light layer
+ * over it. Applied to a fixed layer behind the content rather than via
+ * background-attachment, which iOS Safari renders badly.
+ */
+@utility room-ground {
+	background-color: var(--color-wall);
+	background-image: url('/wall.jpg');
+	background-size: cover;
+	background-position: center top;
+	background-repeat: no-repeat;
+}
+
+/* The menu's grid, for surfaces that aren't the photographed wall. */
+@utility room-grid {
+	background-color: var(--color-wall);
+	background-image:
+		linear-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px),
+		linear-gradient(90deg, rgb(255 255 255 / 0.08) 1px, transparent 1px),
+		radial-gradient(circle at 70% 48%, rgb(76 78 91 / 0.55), transparent 35rem);
+	background-size:
+		7.2rem 7.2rem,
+		7.2rem 7.2rem,
+		auto;
+}
+
+/*
+ * Deepens the corners so content in the middle stays legible over the photo.
+ * The wall already has a vignette; this only extends it past the frame.
+ */
+@utility vignette {
+	background-image: radial-gradient(
+		ellipse 95% 80% at 50% 40%,
+		transparent 40%,
+		rgb(10 10 14 / 0.45) 80%,
+		rgb(10 10 14 / 0.8) 100%
+	);
+}
+
+/* A strip of packing tape — sticks the night's sheet to the wall. */
+@utility tape {
+	background: linear-gradient(
+		180deg,
+		rgb(226 240 255 / 0.26),
+		rgb(226 240 255 / 0.15) 45%,
+		rgb(170 186 205 / 0.22)
+	);
+	box-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
 }
