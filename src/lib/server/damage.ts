@@ -1,37 +1,20 @@
-export type BattleCard = {
-	id: string;
-	display_name: string;
-	element: Element;
-	hp: number;
-	damage: number;
-};
+import type {
+	BattleCard,
+	BattleCombatant,
+	BattleLogEntry,
+	BattleOutcome,
+	BattleResult,
+	Element,
+	Item
+} from '$lib/types';
 
-export type BattleLogEntry = {
-	step: number;
-	attacker: string; // display_name
-	defender: string; // display_name
-	attackerElement: Element;
-	defenderElement: Element;
-	baseDamage: number;
-	multiplier: number;
-	totalDamage: number;
-	defenderOldHp: number;
-	defenderNewHp: number;
-	/** If the defender was knocked out this hit */
-	knockout: boolean;
-};
-
-export type BattleResult = {
-	victory: boolean; // true = player won
-	playerCards: BattleCard[];
-	aiCards: BattleCard[];
-	logs: BattleLogEntry[];
-	/** The 3 cards the AI selected from the remaining 7 */
-	aiSelection: BattleCard[];
-	/** How many turns the battle lasted */
-	totalSteps: number;
-};
-
+/**
+ * How much damage an attacking element (outer key) deals to a defending one
+ * (inner key), as a multiplier on the attacker's `damage` stat.
+ *
+ * Keyed off the element registry in `$lib/types`, so registering a new element
+ * stops this file compiling until its row and column are filled in.
+ */
 const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 	water: {
 		water: 1.0,
@@ -42,7 +25,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.0,
 		socratic: 1.0,
 		tung_descendant: 0.75,
-		grimble: 1.0,
+		grimble: 1.0
 	},
 	fire: {
 		water: 0.75,
@@ -53,7 +36,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.0,
 		socratic: 1.0,
 		tung_descendant: 1.0,
-		grimble: 1.2,
+		grimble: 1.2
 	},
 	ice: {
 		water: 1.5,
@@ -64,7 +47,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.2,
 		socratic: 1.0,
 		tung_descendant: 1.5,
-		grimble: 1.0,
+		grimble: 1.0
 	},
 	air: {
 		water: 1.0,
@@ -75,7 +58,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.5,
 		socratic: 1.2,
 		tung_descendant: 1.0,
-		grimble: 0.75,
+		grimble: 0.75
 	},
 	metal: {
 		water: 0.75,
@@ -86,7 +69,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.0,
 		socratic: 1.0,
 		tung_descendant: 1.2,
-		grimble: 1.0,
+		grimble: 1.0
 	},
 	void: {
 		water: 1.2,
@@ -97,7 +80,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.5,
 		socratic: 1.5,
 		tung_descendant: 1.0,
-		grimble: 1.5,
+		grimble: 1.5
 	},
 	socratic: {
 		water: 1.0,
@@ -108,7 +91,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 0.75,
 		socratic: 1.0,
 		tung_descendant: 1.5,
-		grimble: 1.2,
+		grimble: 1.2
 	},
 	tung_descendant: {
 		water: 1.5,
@@ -119,7 +102,7 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 1.0,
 		socratic: 0.75,
 		tung_descendant: 1.0,
-		grimble: 1.5,
+		grimble: 1.5
 	},
 	grimble: {
 		water: 1.0,
@@ -130,163 +113,146 @@ const DAMAGE_MATRIX: Record<Element, Record<Element, number>> = {
 		void: 0.75,
 		socratic: 0.75,
 		tung_descendant: 1.5,
-		grimble: 1.5,
-	},
+		grimble: 1.5
+	}
 };
 
+/**
+ * Safety valve. Every hit removes at least 1 HP as long as the attacker has a
+ * `damage` stat, so a battle terminates on its own — this only catches a card
+ * that somehow deals nothing.
+ */
+const MAX_ROUNDS = 50;
 
-// ============================================================
-// HELPERS
-// ============================================================
+export type BattleOptions = {
+	/** How many cards the AI draws from the pool. Defaults to the player's team size. */
+	aiTeamSize?: number;
+	rng?: () => number;
+};
 
-/** Fisher-Yates shuffle — returns a new array. */
-function shuffle<T>(arr: readonly T[]): T[] {
-	const result = [...arr];
-	for (let i = result.length - 1; i > 0; i--) {
-		const j = Math.floor(Math.random() * (i + 1));
-		[result[i], result[j]] = [result[j], result[i]];
-	}
-	return result;
+/** Drops the stats a battle doesn't care about. */
+export function toBattleCard({ id, display_name, element, hp, damage }: Item): BattleCard {
+	return { id, display_name, element, hp, damage };
 }
-
-/** Deep-clone a card so mutations don't leak. */
-function cloneCard(card: BattleCard): BattleCard {
-	return { ...card };
-}
-
-function cloneCards(cards: readonly BattleCard[]): BattleCard[] {
-	return cards.map(cloneCard);
-}
-
-/** Get all alive cards from a side. */
-function aliveCards(side: BattleCard[]): BattleCard[] {
-	return side.filter((c) => c.hp > 0);
-}
-
-/** Build a turn queue: interleave team A and team B, shuffled within each team per round. */
-function buildQueue(teamA: BattleCard[], teamB: BattleCard[]): BattleCard[] {
-	const queue: BattleCard[] = [];
-	const a = shuffle(aliveCards(teamA));
-	const b = shuffle(aliveCards(teamB));
-	const maxLen = Math.max(a.length, b.length);
-	for (let i = 0; i < maxLen; i++) {
-		if (i < a.length) queue.push(a[i]);
-		if (i < b.length) queue.push(b[i]);
-	}
-	return queue;
-}
-
-/** Pick a random defender from the opposing side. */
-function pickDefender(attackers: BattleCard[], defenders: BattleCard[]): BattleCard {
-	const alive = aliveCards(defenders);
-	if (alive.length === 0) {
-		throw new Error("No defenders alive — battle should have ended.");
-	}
-	return alive[Math.floor(Math.random() * alive.length)];
-}
-
-/** Determine which side a card belongs to. */
-function getSide(
-	card: BattleCard,
-	playerCards: BattleCard[],
-	aiCards: BattleCard[],
-): "player" | "ai" {
-	if (playerCards.some((c) => c.id === card.id)) return "player";
-	return "ai";
-}
-
-// ============================================================
-// MAIN BATTLE FUNCTION
-// ============================================================
 
 /**
- * Execute a full battle between the player's 3 cards and
- * 3 randomly-selected AI cards from the remaining 7.
+ * Runs a battle between the player's cards and a team the AI draws at random
+ * from `pool` — the items from the same pull the player passed on.
  *
- * @param playerCards - The 3 cards the player selected
- * @param remainingCards - The 7 cards not selected by the player
- * @returns BattleResult with full turn-by-turn logs
+ * Rounds alternate between the sides: each living card takes one turn, hitting
+ * a random living opponent, until one side is wiped.
  */
 export function executeBattle(
 	playerCards: readonly BattleCard[],
-	remainingCards: readonly BattleCard[],
+	pool: readonly BattleCard[],
+	options: BattleOptions = {}
 ): BattleResult {
-	// 1. AI selects 3 random cards from the remaining 7
-	const aiSelection = shuffle(remainingCards).slice(0, 3).map(cloneCard);
+	const { rng = Math.random, aiTeamSize = playerCards.length } = options;
 
-	// 2. Deep-clone both sides so we can mutate HP freely
-	const player = cloneCards(playerCards);
-	const ai = cloneCards(aiSelection);
+	// toCombatant copies, so the caller's cards never see the HP mutation.
+	const player = playerCards.map(toCombatant);
+	const ai = shuffle(pool, rng).slice(0, aiTeamSize).map(toCombatant);
 
-	// 3. Battle state
 	const logs: BattleLogEntry[] = [];
-	let step = 0;
-	const MAX_STEPS = 100; // safety valve to prevent infinite loops
+	let round = 0;
 
-	// 4. Turn loop
-	while (aliveCards(player).length > 0 && aliveCards(ai).length > 0 && step < MAX_STEPS) {
-		const queue = buildQueue(player, ai);
+	while (round < MAX_ROUNDS && anyAlive(player) && anyAlive(ai)) {
+		round++;
 
-		for (const attacker of queue) {
-			// Re-check victory condition mid-round
-			if (aliveCards(player).length === 0 || aliveCards(ai).length === 0) break;
-
-			// Skip dead attackers (they may have died earlier this round)
+		for (const { attacker, defenders } of buildQueue(player, ai, rng)) {
+			// The attacker may have been knocked out earlier in this same round.
 			if (attacker.hp <= 0) continue;
 
-			const attackerSide = getSide(attacker, player, ai);
-			const defenderSide = attackerSide === "player" ? ai : player;
+			const defender = pickTarget(defenders, rng);
+			// That side is wiped — the round ends here, and so does the battle.
+			if (!defender) break;
 
-			const defender = pickDefender(player, ai); // the function checks both
-			// More explicit: find defender from the correct side
-			const actualDefender = (attackerSide === "player" ? ai : player).find(
-				(c) => c.id === defender.id,
-			);
-			if (!actualDefender || actualDefender.hp <= 0) continue;
-
-			// --- Calculate damage ---
-			const multiplier = DAMAGE_MATRIX[attacker.element][actualDefender.element];
-			const baseDamage = attacker.damage;
-			const totalDamage = Math.round(baseDamage * multiplier);
-			const oldHp = actualDefender.hp;
-			const newHp = Math.max(0, oldHp - totalDamage);
-			actualDefender.hp = newHp;
-
-			step++;
-
-			// --- Log ---
-			logs.push({
-				step,
-				attacker: attacker.display_name,
-				defender: actualDefender.display_name,
-				attackerElement: attacker.element,
-				defenderElement: actualDefender.element,
-				baseDamage,
-				multiplier,
-				totalDamage,
-				defenderOldHp: oldHp,
-				defenderNewHp: newHp,
-				knockout: newHp <= 0,
-			});
-
-			// If the attacker's target dies, we just continue —
-			// the attacker still keeps their turn for this round.
+			logs.push(strike(attacker, defender, logs.length + 1, round));
 		}
 	}
 
-	// 5. Determine victory
-	const playerAlive = aliveCards(player).length > 0;
-	const aiAlive = aliveCards(ai).length > 0;
+	return { outcome: decide(player, ai), player, ai, logs, rounds: round };
+}
 
-	// Player wins if AI is wiped; if both alive (hit step limit), it's a draw → player loses
-	const victory = playerAlive && !aiAlive;
+/** One card's turn: who swings, and which side they may swing at. */
+type Turn = { attacker: BattleCombatant; defenders: BattleCombatant[] };
+
+/**
+ * Orders a round's turns, interleaving the sides so neither gets to act twice
+ * before the other answers. Pairing each attacker with the opposing array here
+ * is what keeps a card from ever being handed a target from its own side.
+ */
+function buildQueue(player: BattleCombatant[], ai: BattleCombatant[], rng: () => number): Turn[] {
+	const attackers = { player: shuffle(living(player), rng), ai: shuffle(living(ai), rng) };
+	const turns: Turn[] = [];
+
+	for (let i = 0; i < Math.max(attackers.player.length, attackers.ai.length); i++) {
+		if (i < attackers.player.length) turns.push({ attacker: attackers.player[i], defenders: ai });
+		if (i < attackers.ai.length) turns.push({ attacker: attackers.ai[i], defenders: player });
+	}
+	return turns;
+}
+
+/** Resolves one attack, applying the damage and describing what happened. */
+function strike(
+	attacker: BattleCombatant,
+	defender: BattleCombatant,
+	step: number,
+	round: number
+): BattleLogEntry {
+	const multiplier = DAMAGE_MATRIX[attacker.element][defender.element];
+	const totalDamage = Math.round(attacker.damage * multiplier);
+	const defenderHpBefore = defender.hp;
+
+	defender.hp = Math.max(0, defenderHpBefore - totalDamage);
 
 	return {
-		victory,
-		playerCards: player, // final HP states
-		aiCards: ai, // final HP states
-		logs,
-		aiSelection,
-		totalSteps: step,
+		step,
+		round,
+		attackerId: attacker.id,
+		defenderId: defender.id,
+		attackerElement: attacker.element,
+		defenderElement: defender.element,
+		baseDamage: attacker.damage,
+		multiplier,
+		totalDamage,
+		defenderHpBefore,
+		defenderHpAfter: defender.hp,
+		knockout: defender.hp === 0
 	};
+}
+
+function decide(player: BattleCombatant[], ai: BattleCombatant[]): BattleOutcome {
+	const playerAlive = anyAlive(player);
+	const aiAlive = anyAlive(ai);
+
+	if (playerAlive === aiAlive) return 'draw';
+	return playerAlive ? 'player' : 'ai';
+}
+
+function toCombatant(card: BattleCard): BattleCombatant {
+	return { ...card, maxHp: card.hp };
+}
+
+function living(side: readonly BattleCombatant[]): BattleCombatant[] {
+	return side.filter((card) => card.hp > 0);
+}
+
+function anyAlive(side: readonly BattleCombatant[]): boolean {
+	return side.some((card) => card.hp > 0);
+}
+
+function pickTarget(side: readonly BattleCombatant[], rng: () => number): BattleCombatant | null {
+	const targets = living(side);
+	return targets.length > 0 ? targets[Math.floor(rng() * targets.length)] : null;
+}
+
+/** Fisher-Yates — returns a new array. */
+function shuffle<T>(items: readonly T[], rng: () => number): T[] {
+	const result = [...items];
+	for (let i = result.length - 1; i > 0; i--) {
+		const j = Math.floor(rng() * (i + 1));
+		[result[i], result[j]] = [result[j], result[i]];
+	}
+	return result;
 }

@@ -152,13 +152,23 @@ describe('pull', () => {
 
 	it('falls back when no item matches the rolled pairing', () => {
 		const pool: Item[] = [
-			{ id: '1', displayName: 'A', image: '/a.png', rarity: RARITIES[0], element: ELEMENT_A },
+			{
+				id: '1',
+				display_name: 'A',
+				image: '/a.png',
+				rarity: RARITIES[0],
+				element: ELEMENT_A,
+				hp: 100,
+				damage: 10
+			},
 			{
 				id: '2',
-				displayName: 'B',
+				display_name: 'B',
 				image: '/b.png',
 				rarity: RARITIES[RARITIES.length - 1],
-				element: ELEMENT_B ?? ELEMENT_A
+				element: ELEMENT_B ?? ELEMENT_A,
+				hp: 120,
+				damage: 20
 			}
 		];
 

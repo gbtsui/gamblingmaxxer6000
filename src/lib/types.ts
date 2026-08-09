@@ -75,3 +75,54 @@ export type RandomItemsResponse = {
 		current: PullOdds;
 	};
 };
+
+/** How many cards each side brings into a battle. */
+export const TEAM_SIZE = 3;
+
+/** The combat-relevant slice of an `Item`. */
+export type BattleCard = Pick<Item, 'id' | 'display_name' | 'element' | 'hp' | 'damage'>;
+
+/**
+ * A card in a battle. `hp` counts down as it takes hits; `maxHp` is what it
+ * started with, so a client can size a health bar without a second lookup.
+ */
+export type BattleCombatant = BattleCard & { maxHp: number };
+
+/** One attack, in the order it happened. */
+export type BattleLogEntry = {
+	/** 1-based, counted across the whole battle. */
+	step: number;
+	/** Which round the attack fell in. Every living card acts once per round. */
+	round: number;
+	attackerId: string;
+	defenderId: string;
+	attackerElement: Element;
+	defenderElement: Element;
+	/** The attacker's `damage` stat, before the element multiplier. */
+	baseDamage: number;
+	multiplier: number;
+	/** What actually came off the defender's HP. */
+	totalDamage: number;
+	defenderHpBefore: number;
+	defenderHpAfter: number;
+	/** Whether this hit is what took the defender to 0. */
+	knockout: boolean;
+};
+
+/**
+ * Who was left standing. A draw means either both sides traded their last
+ * knockouts in the same round, or the battle hit its round cap.
+ */
+export type BattleOutcome = 'player' | 'ai' | 'draw';
+
+/** The result of a battle, as returned by `/api/battle`. */
+export type BattleResult = {
+	outcome: BattleOutcome;
+	/** The player's team at its final HP. */
+	player: BattleCombatant[];
+	/** The AI's team at its final HP — also the selection it drew from the pool. */
+	ai: BattleCombatant[];
+	logs: BattleLogEntry[];
+	/** How many rounds the battle lasted. */
+	rounds: number;
+};
