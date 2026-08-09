@@ -77,6 +77,7 @@
         try {
             const res = await fetch('/api/items/random', {
                 method: "POST",
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     odds: currentOdds
                 })
