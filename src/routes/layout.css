@@ -1,3 +1,7 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+h1, h2, h3, p, a {
+    font-family: Helvetica, sans-serif;
+}
